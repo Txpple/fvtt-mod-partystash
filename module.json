@@ -1,0 +1,34 @@
+{
+  "id": "fvtt-mod-partystash",
+  "title": "Party Stash",
+  "description": "True move semantics for the shared party stash: dragging an item between a dnd5e Group actor and one of its members moves it instead of copying it, when you own both sides. The system's own drop pipeline does the work — the source is only deleted after the copy lands, consumable stacks merge, container contents come along — and Ctrl-drag still forces a plain copy. All other drags (PC to PC, NPC looting, compendium drops) keep stock behavior.",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "Matthew Sippel"
+    }
+  ],
+  "esmodules": [
+    "scripts/partystash.js"
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "relationships": {
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "5.0"
+        }
+      }
+    ]
+  },
+  "url": "https://github.com/Txpple/fvtt-mod-partystash",
+  "manifest": "https://github.com/Txpple/fvtt-mod-partystash/releases/latest/download/module.json",
+  "download": "https://github.com/Txpple/fvtt-mod-partystash/releases/download/v1.0.0/fvtt-mod-partystash.zip",
+  "readme": "https://github.com/Txpple/fvtt-mod-partystash#readme",
+  "license": "MIT"
+}
