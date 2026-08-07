@@ -15,7 +15,13 @@ copy behavior:
 
 - the item is a physical item dragged between a Group actor and **one of its own members**
   (PC↔PC gifting, NPC looting, sidebar/compendium drops are untouched),
-- the dragging user **owns both sides** — otherwise the drop copies as before.
+- the dragging user **owns both sides**.
+
+If only **one** side is owned — say a player drags a fellow member's gear into the stash from
+that member's read-only sheet — the drop is **blocked** (no-drop cursor plus a warning)
+rather than silently falling back to a copy: the server would refuse the source delete and a
+duplicate would be stranded. When a duplicate is actually what you want, Ctrl-drag still
+copies.
 
 Under the hood this only changes dnd5e's *default* drop behavior for that one case — the
 system's own move pipeline does the actual work. That buys the safe ordering (the source is
