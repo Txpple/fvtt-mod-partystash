@@ -8,6 +8,19 @@
  */
 
 /* -------------------------------------------------- */
+/*  Loaded probe                                      */
+/* -------------------------------------------------- */
+
+/* The `ready` hook in partystash.js appends one of these, reads its computed
+   `flex-direction`, and removes it — the only honest way to ask whether this sheet reached
+   the cascade, since Foundry v14 bundles module CSS and emits no per-module <link> to look
+   for. `column` is a value no bare div has. Never used for layout; keep the declaration. */
+.partystash-css-probe {
+  display: none;
+  flex-direction: column;
+}
+
+/* -------------------------------------------------- */
 /*  The currency row                                  */
 /* -------------------------------------------------- */
 

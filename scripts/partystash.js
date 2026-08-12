@@ -871,23 +871,42 @@ async function coinDialog(group, dir) {
 }
 
 /**
- * Make sure the module's stylesheet is actually loaded.
+ * Make sure the module's stylesheet is actually in the cascade.
  *
  * `styles` in module.json is the real mechanism and covers any normal install. This is a
  * fallback for one specific situation: Foundry builds `game.modules` from a package scan done
  * at server PROCESS boot, so on a host where the module's files were hot-replaced under a
  * running server (how this module is deployed to its Molten box) a NEWLY ADDED `styles` entry
  * is invisible until that process next restarts — the code would update while its CSS did not.
- * Self-nullifying: if the manifest-declared sheet is present, this does nothing.
+ *
+ * ⚠️ ASK THE CASCADE, NOT THE DOM. v1.3 tested for a `link[href*="fvtt-mod-partystash/styles/"]`
+ * and injected one when it found none — which on Foundry v14 is ALWAYS, because core bundles
+ * module CSS into its own layered stylesheets and never emits a per-module link tag. The
+ * fallback therefore fired on every single load, fetching a second copy of a sheet that was
+ * already applied, and the "self-nullifying" property it claimed never held (found live
+ * 2026-08-12, after the process restart that should have made it stand down).
+ *
+ * So the probe measures the thing that actually matters: does a rule of ours reach an element?
+ * `.partystash-css-probe` exists in the stylesheet for exactly this question — a detached-
+ * looking, invisible div that our sheet gives `flex-direction: column`, which no bare div has.
  */
 Hooks.once("ready", () => {
   try {
-    if (document.querySelector(`link[href*="${MODULE_ID}/styles/"]`)) return;
+    const probe = document.createElement("div");
+    probe.className = "partystash-css-probe";
+    document.body.append(probe);
+    const applied = getComputedStyle(probe).flexDirection === "column";
+    probe.remove();
+    if (applied) return;
+
+    if (document.querySelector(`link[data-${MODULE_ID}-fallback]`)) return; // already injected
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = `modules/${MODULE_ID}/styles/partystash.css`;
-    link.dataset.partystashFallback = "true";
+    link.setAttribute(`data-${MODULE_ID}-fallback`, "true");
     document.head.append(link);
+    console.warn(`${MODULE_ID} | the manifest stylesheet is not in the cascade — loading it `
+      + "directly. Expected only on a host whose package registry predates this version.");
   } catch (err) {
     console.error(`${MODULE_ID} | loading the stylesheet failed — the coin buttons will work `
       + "but look unstyled", err);
