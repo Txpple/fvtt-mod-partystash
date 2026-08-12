@@ -28,6 +28,12 @@
  *     copy — the server would refuse the source delete and strand a duplicate. An
  *     intentional duplicate is still available via Ctrl-drag.
  *
+ * v1.2 adds transfer receipts: every change to a group actor's loot — items in or out,
+ * stack quantity changes, coin — is whispered to the GMs and the acting player as an
+ * audit line (Loot Shelf's audit-line pattern, kept as a whisper here). Receipts ride
+ * the document hooks rather than the drag pipeline, so GM stocking, forced Shift/Ctrl
+ * drags and API calls are on the record too. See the receipts section below.
+ *
  * Implemented as a wrap of BaseActorSheet#_defaultDropBehavior — the single seam where
  * dnd5e decides a drag's default behavior (same wrap style as fvtt-mod-autoexplore's
  * FogManager wraps). Verified against dnd5e 5.3.3 on Foundry v14: the group sheet
@@ -45,6 +51,16 @@ Hooks.once("init", () => {
       + "item instead of copying it, when you own both sides. If you own only one side, the drop "
       + "is blocked instead of leaving a duplicate behind. Hold Ctrl while dropping to copy "
       + "anyway. Turn this off to restore the stock copy-on-drop behavior everywhere.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
+
+  game.settings.register(MODULE_ID, "receipts", {
+    name: "Whisper transfer receipts",
+    hint: "Whisper a receipt to the GMs and the acting player whenever loot enters or leaves a "
+      + "group actor's inventory or purse — an audit trail of who moved what through the party stash.",
     scope: "world",
     config: true,
     type: Boolean,
@@ -131,4 +147,219 @@ Hooks.once("setup", () => {
       return fallback;
     }
   };
+});
+
+/* -------------------------------------------------- */
+/*  Transfer receipts                                 */
+/* -------------------------------------------------- */
+
+/**
+ * Every change to a group actor's loot is whispered to the GMs and the acting player —
+ * an audit trail of who moved what through the stash. The chat line itself is Loot
+ * Shelf's audit pattern (speaker alias, actor names in bold), but whispered rather than
+ * public: stash traffic is bookkeeping, not table news.
+ *
+ * Receipts ride the DOCUMENT hooks, not the drag pipeline, so every pathway is covered:
+ * the module's own retargeted drags, forced Shift/Ctrl drags, sidebar and compendium
+ * stocking by the GM, macros and API calls. Only the initiating client records (the
+ * hooks fire on every client; userId says whose gesture it was), so exactly one receipt
+ * is posted per transfer, authored by the user who made it.
+ *
+ * Events are buffered for a short window before posting so one gesture reads as one
+ * receipt:
+ *   - a container arriving or leaving with its contents is one line, not one per item —
+ *     content events are recognized by their container id being part of the same batch
+ *     (nested containers chain-suppress the same way);
+ *   - dnd5e's move pipeline lands as a create on one end plus a delete on the other, a
+ *     few ms apart. When the two halves pair up (same item name and amount, opposite
+ *     directions, the other end a member of that group) the receipt names the member
+ *     ("Bob stashed …"); when pairing misses — a Ctrl-drag copy, GM stocking from the
+ *     sidebar, a late delete ack — the receipt still lands, named after the acting user
+ *     ("Alice added …");
+ *   - consumable stack merges surface as a quantity delta on the existing stack rather
+ *     than a create (captured via preUpdate), and pair the same way. Manual quantity
+ *     edits on a stash item come out as plain added/removed lines — a GM adjusting the
+ *     stash is also worth a line in the ledger.
+ *
+ * Coin is loot too: currency changes on a group actor get their own receipt with signed
+ * per-denomination deltas — no re-denomination, matching Loot Shelf's coin manners.
+ */
+
+const RECEIPT_WINDOW = 500;
+const receipts = { events: [], timer: null };
+
+function receiptsEnabled() {
+  try {
+    return game.settings.get(MODULE_ID, "receipts");
+  } catch {
+    return false;
+  }
+}
+
+/** True when `actor` is a member of any group actor in the world. */
+function isGroupMember(actor) {
+  return game.actors.some(g =>
+    g.type === "group" && g.system?.members?.some?.(m => m.actor === actor));
+}
+
+/**
+ * Queue one side of a transfer for the next receipt flush. Group-actor events become
+ * receipt lines; member events are context, consulted only to name the counterparty.
+ * @param {Item} item            The item that changed hands (or changed quantity).
+ * @param {"gain"|"loss"} dir    Whether the item's actor gained or lost the amount.
+ * @param {number} amount        How many changed hands.
+ * @param {boolean} fromStack    The event was a quantity delta on an existing stack,
+ *                               not a create/delete — never a container with cargo.
+ */
+function recordReceipt(item, dir, amount, fromStack = false) {
+  const actor = item.parent;
+  if (!(actor instanceof Actor) || actor.pack) return;
+  const isGroup = actor.type === "group";
+  if (!isGroup && !isGroupMember(actor)) return;
+  receipts.events.push({
+    dir, amount, isGroup, actor, fromStack,
+    name: item.name,
+    id: item.id,
+    containerId: item.system?.container ?? null,
+    isContainer: item.type === "container",
+    used: false
+  });
+  clearTimeout(receipts.timer);
+  receipts.timer = setTimeout(flushReceipts, RECEIPT_WINDOW);
+}
+
+function flushReceipts() {
+  receipts.timer = null;
+  const events = receipts.events;
+  receipts.events = [];
+  try {
+    const groupEvents = events.filter(e => e.isGroup);
+    if (!groupEvents.length) return;
+    const memberEvents = events.filter(e => !e.isGroup);
+
+    // Containers that moved in this batch, per direction — anything created or deleted
+    // INSIDE one of them is cargo, implied by the container's own line.
+    const movedContainers = dir => new Set(
+      groupEvents.filter(e => e.isContainer && !e.fromStack && e.dir === dir).map(e => e.id));
+    const gained = movedContainers("gain");
+    const lost = movedContainers("loss");
+
+    const lines = [];
+    for (const g of groupEvents) {
+      if (g.containerId && !g.fromStack && (g.dir === "gain" ? gained : lost).has(g.containerId)) continue;
+      const pair = memberEvents.find(m => !m.used && m.dir !== g.dir
+        && m.name === g.name && m.amount === g.amount
+        && g.actor.system?.members?.some?.(mm => mm.actor === m.actor));
+      if (pair) pair.used = true;
+      const cargo = g.isContainer && events.some(e => e !== g && e.containerId === g.id);
+      const label = `${g.amount} × <em>${g.name}</em>${cargo ? " (and its contents)" : ""}`;
+      const group = `<strong>${g.actor.name}</strong>`;
+      if (g.dir === "gain") {
+        lines.push(pair
+          ? `<strong>${pair.actor.name}</strong> stashed ${label} in ${group}.`
+          : `<strong>${game.user.name}</strong> added ${label} to ${group}.`);
+      } else {
+        lines.push(pair
+          ? `<strong>${pair.actor.name}</strong> took ${label} from ${group}.`
+          : `<strong>${game.user.name}</strong> removed ${label} from ${group}.`);
+      }
+    }
+    if (lines.length) postReceipt(lines);
+  } catch (err) {
+    console.error(`${MODULE_ID} | building the transfer receipt failed`, err);
+  }
+}
+
+/**
+ * Whisper receipt lines to the GMs and the acting player. Created by the acting client,
+ * so the message is authored by the right user without the proxy-side `author` juggling
+ * Loot Shelf needs; the alias keeps it visibly a Party Stash ledger line.
+ */
+function postReceipt(lines) {
+  const whisper = [...new Set([
+    ...game.users.filter(u => u.isGM).map(u => u.id),
+    game.user.id
+  ])];
+  ChatMessage.implementation.create({
+    content: lines.join("<br>"),
+    whisper,
+    speaker: { alias: "Party Stash" }
+  }).catch(err => console.error(`${MODULE_ID} | receipt message failed`, err));
+}
+
+Hooks.on("createItem", (item, options, userId) => {
+  try {
+    if (userId !== game.user.id || !receiptsEnabled()) return;
+    if (!item.system?.schema?.fields?.quantity) return; // physical items only
+    recordReceipt(item, "gain", Math.max(1, Math.floor(item.system.quantity ?? 1)));
+  } catch (err) {
+    console.error(`${MODULE_ID} | receipt create-hook failed`, err);
+  }
+});
+
+Hooks.on("deleteItem", (item, options, userId) => {
+  try {
+    if (userId !== game.user.id || !receiptsEnabled()) return;
+    if (!item.system?.schema?.fields?.quantity) return;
+    recordReceipt(item, "loss", Math.max(1, Math.floor(item.system.quantity ?? 1)));
+  } catch (err) {
+    console.error(`${MODULE_ID} | receipt delete-hook failed`, err);
+  }
+});
+
+// Quantity deltas need the before value, which only preUpdate can see; it rides across
+// on `options` (preUpdate fires initiator-side only, and only that client posts).
+Hooks.on("preUpdateItem", (item, changes, options, userId) => {
+  try {
+    if (changes.system?.quantity === undefined || !receiptsEnabled()) return;
+    if (!item.system?.schema?.fields?.quantity) return;
+    foundry.utils.setProperty(options, `${MODULE_ID}.quantity`, item.system.quantity);
+  } catch (err) {
+    console.error(`${MODULE_ID} | receipt pre-update failed`, err);
+  }
+});
+
+Hooks.on("updateItem", (item, changes, options, userId) => {
+  try {
+    if (userId !== game.user.id || !receiptsEnabled()) return;
+    const before = foundry.utils.getProperty(options, `${MODULE_ID}.quantity`);
+    if (before === undefined) return;
+    const delta = Math.floor(item.system.quantity ?? 0) - Math.floor(before ?? 0);
+    if (!delta) return;
+    recordReceipt(item, delta > 0 ? "gain" : "loss", Math.abs(delta), true);
+  } catch (err) {
+    console.error(`${MODULE_ID} | receipt update-hook failed`, err);
+  }
+});
+
+Hooks.on("preUpdateActor", (actor, changes, options, userId) => {
+  try {
+    if (actor.type !== "group" || actor.pack) return;
+    if (changes.system?.currency === undefined || !receiptsEnabled()) return;
+    foundry.utils.setProperty(options, `${MODULE_ID}.currency`, { ...actor.system.currency });
+  } catch (err) {
+    console.error(`${MODULE_ID} | receipt currency pre-update failed`, err);
+  }
+});
+
+Hooks.on("updateActor", (actor, changes, options, userId) => {
+  try {
+    if (userId !== game.user.id || !receiptsEnabled()) return;
+    const before = foundry.utils.getProperty(options, `${MODULE_ID}.currency`);
+    if (!before) return;
+    const parts = [];
+    let gains = 0, losses = 0;
+    for (const coin of ["pp", "gp", "ep", "sp", "cp"]) {
+      const delta = Math.floor(actor.system.currency?.[coin] ?? 0) - Math.floor(before[coin] ?? 0);
+      if (!delta) continue;
+      parts.push(`${delta > 0 ? "+" : ""}${delta} ${coin}`);
+      if (delta > 0) gains++;
+      else losses++;
+    }
+    if (!parts.length) return;
+    const verb = losses === 0 ? "added coin to" : gains === 0 ? "took coin from" : "adjusted the coin in";
+    postReceipt([`<strong>${game.user.name}</strong> ${verb} <strong>${actor.name}</strong>: ${parts.join(", ")}.`]);
+  } catch (err) {
+    console.error(`${MODULE_ID} | receipt currency-hook failed`, err);
+  }
 });

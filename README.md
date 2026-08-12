@@ -32,8 +32,23 @@ modifiers still work everywhere:
 - **Ctrl-drag** (or Alt-drag) — force a plain **copy**, even to/from the stash,
 - **Shift-drag** — force a **move** for any drag dnd5e allows (e.g. looting an NPC).
 
-One world setting (**Game Settings → Configure Settings → Party Stash**) turns the whole
-thing off.
+## Transfer receipts
+
+Every loot transfer in or out of a Group actor is recorded as a **chat whisper** to the
+GMs and the acting player — an audit trail of who moved what through the party stash.
+Receipts hook the document layer rather than the drag gesture, so everything is on the
+record: the module's own moves, forced Shift/Ctrl drags, GM stocking from the sidebar or
+a compendium, macros, and coin changes on the group sheet (as signed per-denomination
+deltas — coin is never re-denominated).
+
+One gesture reads as one receipt: a container arriving with its contents is a single
+line, and the two halves of a move pair up so the line names the member involved
+(*"Bob stashed 3 × Rations in Party Stash"*). When the counterparty isn't part of the
+gesture — a Ctrl-drag copy, sidebar stocking — the line is named after the acting user
+instead. Consumable stack merges show up as the quantity they added, not as a new item.
+
+Two world settings (**Game Settings → Configure Settings → Party Stash**) turn the move
+semantics and the receipts off independently.
 
 ## Compatibility
 
