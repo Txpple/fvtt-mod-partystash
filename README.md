@@ -32,6 +32,12 @@ modifiers still work everywhere:
 - **Ctrl-drag** (or Alt-drag) — force a plain **copy**, even to/from the stash,
 - **Shift-drag** — force a **move** for any drag dnd5e allows (e.g. looting an NPC).
 
+Sibling of [Loot Shelf](https://github.com/Txpple/fvtt-mod-lootshelf) — Party Stash owns the
+shared party inventory; Loot Shelf owns loot on the ground and goods for sale. Neither needs
+the other installed, but they are built to the same manners — coin is never re-denominated,
+the destination is credited before the source is debited, and their receipts are configured
+the same way and read as one running account of the party's stuff.
+
 ## Moving coin
 
 Items move by dragging; coin can't be dragged. So the group sheet's currency row gets two
@@ -51,10 +57,10 @@ credited before the source is debited, so a failure duplicates coin rather than 
 
 ## Transfer receipts
 
-Every loot transfer in or out of a Group actor is posted to the **chat log for the whole
-table** — a shared record of who moved what through the party stash, which is what settles
-"who took the healing potion?" without anyone having to remember. (Loot Shelf's audit lines
-work the same way, so shop, chest and stash traffic read as one running account.)
+Every loot transfer in or out of a Group actor is posted to chat — a record of who moved what
+through the party stash, which is what settles "who took the healing potion?" without anyone
+having to remember. By default it goes to the **whole table**; **Receipt Settings** can send
+it to the transaction's participants and the DMs instead (see below).
 Receipts hook the document layer rather than the drag gesture, so everything is on the
 record: the module's own moves, forced Shift/Ctrl drags, GM stocking from the sidebar or
 a compendium, macros, and coin changes on the group sheet (as signed per-denomination
@@ -70,8 +76,29 @@ One gesture reads as one receipt, and a deposit or withdrawal names the member a
 direction (*"Gren Greenmantle deposited 12 gp into The Party"*) rather than a signed delta —
 hand edits and GM adjustments still read as adjustments, because that is what they are.
 
-Three world settings (**Game Settings → Configure Settings → Party Stash**) turn the move
-semantics, the receipts, and the coin window off independently.
+## Settings
+
+**Game Settings → Configure Settings → Party Stash.**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Move items between party and members | on | Turn off to restore stock copy-on-drop everywhere. |
+| Post transfer receipts | on | Turn off for no ledger at all. |
+| Receipts | broadcast to the server | Who reads a receipt — see below. |
+| Deposit / withdraw coin window | on | Turn off to restore the stock currency row for everyone. |
+
+**Receipt Settings** is a choice of two, and Loot Shelf offers the same one, so a table can
+set one policy across both modules:
+
+- **Broadcast receipts to the server** *(default)* — every receipt is posted to the chat log
+  for the whole table to read.
+- **Receipts to the transaction participants and the DMs** — whispered to the player on the
+  other end of the transfer (whoever stashed, took, deposited or withdrew) and to the DMs.
+  **Assistant DMs count as DMs here** and see every receipt.
+
+The group actor itself is deliberately not counted when working out who to whisper to: the
+players own the party actor, so counting its owners would turn every whisper straight back
+into a broadcast.
 
 ## Compatibility
 

@@ -136,3 +136,25 @@
 .partystash-dialog .partystash-all-note::after {
   content: ")";
 }
+
+/* Receipt Settings — the delivery choice on the module's settings sheet, rendered as a
+   radio group. It sits inside core's `.form-fields`, which is a flex ROW, so the block has
+   to claim the full width and stack itself. Each consequence note is indented under its
+   option so a note reads as belonging to the choice above it. */
+.partystash-receipt-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.partystash-receipt-modes label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: bold;
+}
+
+.partystash-receipt-modes p.hint {
+  margin: 0 0 6px 22px;
+}

@@ -33,7 +33,10 @@
  * pattern). Receipts ride the document hooks rather than the drag pipeline, so GM stocking,
  * forced Shift/Ctrl drags and API calls are on the record too. They were whispered to the GMs
  * and the acting player until v1.3 made them public, the same call Loot Shelf made: a stash
- * ledger only settles arguments if the whole table can read it. See the receipts section below.
+ * ledger only settles arguments if the whole table can read it. v1.4 turns that verdict into
+ * a choice — Receipt Settings picks between broadcasting to the server (still the default) and
+ * whispering to the transfer's participants and the DMs, the same two options Loot Shelf
+ * offers, so one policy can cover both modules. See the receipts section below.
  *
  * v1.3 adds the coin window. Items move by drag; coin cannot be dragged, so moving gold in
  * and out of the stash meant the system's currency manager, which players could not find or
@@ -52,6 +55,25 @@
  */
 
 const MODULE_ID = "fvtt-mod-partystash";
+
+/**
+ * The two receipt delivery policies, in the order the settings sheet reads them. The labels
+ * double as the stored setting's `choices`; the notes are rendered under the radios.
+ */
+const RECEIPT_MODES = [
+  {
+    value: "public",
+    label: "Broadcast receipts to the server",
+    note: "Every receipt is posted to the chat log for the whole table to read."
+  },
+  {
+    value: "participants",
+    label: "Receipts to the transaction participants and the DMs",
+    note: "Whispered to the player on the other end of the transfer — whoever stashed, took, "
+      + "deposited or withdrew — and to the DMs. Assistant DMs count as DMs here and see "
+      + "every receipt."
+  }
+];
 
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, "enabled", {
@@ -74,6 +96,16 @@ Hooks.once("init", () => {
     config: true,
     type: Boolean,
     default: true
+  });
+
+  game.settings.register(MODULE_ID, "receiptVisibility", {
+    name: "Receipts",
+    hint: "Who reads the receipt when items or coin move through the party stash.",
+    scope: "world",
+    config: true,
+    type: String,
+    default: "public",
+    choices: Object.fromEntries(RECEIPT_MODES.map(m => [m.value, m.label]))
   });
 
   game.settings.register(MODULE_ID, "coin", {
@@ -293,12 +325,18 @@ function flushReceipts() {
     const lost = movedContainers("loss");
 
     const lines = [];
+    // The members this batch names — the personal end of each transfer, and so who (besides
+    // the DMs) a whispered receipt is addressed to.
+    const participants = new Set();
     for (const g of groupEvents) {
       if (g.containerId && !g.fromStack && (g.dir === "gain" ? gained : lost).has(g.containerId)) continue;
       const pair = memberEvents.find(m => !m.used && m.dir !== g.dir
         && m.name === g.name && m.amount === g.amount
         && g.actor.system?.members?.some?.(mm => mm.actor === m.actor));
-      if (pair) pair.used = true;
+      if (pair) {
+        pair.used = true;
+        participants.add(pair.actor);
+      }
       const cargo = g.isContainer && events.some(e => e !== g && e.containerId === g.id);
       const label = `${g.amount} × <em>${g.name}</em>${cargo ? " (and its contents)" : ""}`;
       const group = `<strong>${g.actor.name}</strong>`;
@@ -312,29 +350,76 @@ function flushReceipts() {
           : `<strong>${actingName(g.userId)}</strong> removed ${label} from ${group}.`);
       }
     }
-    if (lines.length) postReceipt(lines, groupEvents[0]?.userId);
+    if (lines.length) postReceipt(lines, groupEvents[0]?.userId, [...participants]);
   } catch (err) {
     console.error(`${MODULE_ID} | building the transfer receipt failed`, err);
   }
 }
 
 /**
- * Post receipt lines to the whole table.
+ * The whisper list for a receipt, or null to post it to the whole table.
+ *
+ * "The DMs" means every user with the ASSISTANT role or above — what `User#isGM` answers and
+ * `getWhisperRecipients("GM")` resolves — so an assistant DM is on every receipt. The setting
+ * note says so rather than leaving a co-DM to discover it by missing one.
+ *
+ * PARTICIPANTS are the MEMBER side of the transfer — whoever stashed, took, deposited or
+ * withdrew — plus the acting user, who may be a GM moving things on a player's behalf. The
+ * GROUP actor is deliberately never consulted for recipients even though it is the other end
+ * of every transfer: at this table (and at any table where the v1.1 drags work at all) the
+ * players own the group, so counting its owners would quietly turn every whisper back into a
+ * broadcast and make the setting a no-op.
+ *
+ * @param {string} [userId]         The acting user.
+ * @param {Actor[]} [participants]  The member-side actors in the transfer.
+ * @returns {string[]|null}         User ids to whisper to, or null for a public message.
+ */
+function receiptWhisper(userId, participants = []) {
+  let mode = "public";
+  try {
+    mode = game.settings.get(MODULE_ID, "receiptVisibility");
+  } catch {
+    return null; // not registered yet — a public line beats a lost one
+  }
+  if (mode !== "participants") return null;
+
+  const ids = new Set(ChatMessage.implementation.getWhisperRecipients("GM").map(u => u.id));
+  if (userId) ids.add(userId);
+  for (const actor of participants) {
+    if (!(actor instanceof Actor)) continue;
+    for (const u of game.users) {
+      if (!ids.has(u.id) && actor.testUserPermission(u, "OWNER")) ids.add(u.id);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Post receipt lines.
  *
  * These were whispered to the GMs and the acting player through v1.2, which made every stash
  * transfer invisible to everyone else — and a SHARED ledger is the point: it is what settles
- * "who took the healing potion?" without anyone having to remember. Public now, by the owner's
+ * "who took the healing potion?" without anyone having to remember. Public by the owner's
  * call on 2026-08-12, matching what Loot Shelf's audit lines already do for shop and chest
- * traffic. The two modules' logs read as one running account of the party's stuff.
+ * traffic — the two modules' logs read as one running account of the party's stuff. Since
+ * v1.4 that is the DEFAULT rather than the only option: the Receipt Settings can send the
+ * line to the transfer's participants and the DMs instead, the same choice Loot Shelf offers,
+ * so a table can set one policy across both modules.
  *
  * Created by the acting client, so the message is authored by the right user without the
  * proxy-side `author` juggling Loot Shelf needs; the alias keeps it visibly a Party Stash
  * ledger line rather than something a character said.
+ *
+ * @param {string[]} lines          The receipt lines, already formatted.
+ * @param {string} [userId]         The acting user.
+ * @param {Actor[]} [participants]  The member-side actors in the transfer.
  */
-function postReceipt(lines, userId) {
+function postReceipt(lines, userId, participants = []) {
+  const whisper = receiptWhisper(userId, participants);
   ChatMessage.implementation.create({
     content: lines.join("<br>"),
     ...(userId ? { author: userId } : {}),
+    ...(whisper ? { whisper } : {}),
     speaker: { alias: "Party Stash" }
   }).catch(err => console.error(`${MODULE_ID} | receipt message failed`, err));
 }
@@ -420,10 +505,14 @@ Hooks.on("updateActor", (actor, changes, options, userId) => {
     const transfer = foundry.utils.getProperty(options, `${MODULE_ID}.transfer`);
     if (transfer?.member) {
       const moved = formatCoins(transfer.amounts);
+      // The dialog rides the member's uuid across so a whispered receipt can reach its
+      // owners; the NAME is what the line prints, and stays the thing it is rendered from.
+      const member = transfer.memberUuid ? fromUuidSync(transfer.memberUuid) : null;
       postReceipt([`<strong>${transfer.member}</strong> `
         + (transfer.dir === "deposit"
           ? `deposited <strong>${moved}</strong> into <strong>${actor.name}</strong>.`
-          : `withdrew <strong>${moved}</strong> from <strong>${actor.name}</strong>.`)], userId);
+          : `withdrew <strong>${moved}</strong> from <strong>${actor.name}</strong>.`)],
+        userId, member instanceof Actor ? [member] : []);
       return;
     }
 
@@ -432,6 +521,90 @@ Hooks.on("updateActor", (actor, changes, options, userId) => {
       + `<strong>${actor.name}</strong>: ${parts.join(", ")}.`], userId);
   } catch (err) {
     console.error(`${MODULE_ID} | receipt currency-hook failed`, err);
+  }
+});
+
+/**
+ * Settings-sheet polish: section headers, and the delivery choice as a labelled RADIO GROUP
+ * instead of the dropdown a `choices` setting gets by default — two mutually exclusive
+ * policies with a paragraph of consequence each is what radios are for, and a `<select>` has
+ * nowhere to put the consequences. Same block, same wording, as Loot Shelf's: the two modules
+ * are configured side by side and a table sets one policy across both.
+ *
+ * The registered `<select>` stays in the form as the real field, merely hidden. It is what
+ * core reads on submit and what core's "Reset Defaults" writes to — that handler dispatches a
+ * `change` event on `form[key]`, which would throw on the RadioNodeList that same-named radios
+ * would make of it. The radios carry no submitting name of their own: they drive the select,
+ * and follow it back when something else changes it. If this whole hook failed, the setting
+ * would degrade to a plain working dropdown.
+ *
+ * Receipts off means there is nothing to deliver, so the choice greys out and follows the
+ * toggle live (a disabled field is skipped by form submission, so it simply keeps its stored
+ * value — the same greying rule fvtt-mod-combatplus uses for its dependent settings).
+ */
+Hooks.on("renderSettingsConfig", (app, element) => {
+  try {
+    const el = element instanceof HTMLElement ? element : element?.[0];
+    const select = el?.querySelector(`select[name="${MODULE_ID}.receiptVisibility"]`);
+    if (!select || select.dataset.partystashRadios) return;
+    select.dataset.partystashRadios = "true";
+    select.hidden = true;
+
+    const field = key => el.querySelector(`[name="${MODULE_ID}.${key}"]`);
+    const divider = (key, text) => {
+      const group = field(key)?.closest(".form-group");
+      if (!group || group.previousElementSibling?.classList?.contains("partystash-divider")) return;
+      const header = document.createElement("h4");
+      header.className = "divider partystash-divider";
+      header.textContent = text;
+      group.before(header);
+    };
+    divider("enabled", "Item Transfers");
+    divider("receipts", "Receipt Settings");
+    divider("coin", "Coin Window");
+
+    const radios = document.createElement("div");
+    radios.className = "partystash-receipt-modes";
+    for (const mode of RECEIPT_MODES) {
+      const label = document.createElement("label");
+      label.className = "checkbox";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = `${MODULE_ID}.receiptVisibility.choice`; // unregistered: ignored on submit
+      input.value = mode.value;
+      input.checked = select.value === mode.value;
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        select.value = mode.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      label.append(input, document.createTextNode(` ${mode.label}`));
+      const note = document.createElement("p");
+      note.className = "hint";
+      note.textContent = mode.note;
+      radios.append(label, note);
+    }
+    select.after(radios);
+
+    // Follow the select rather than owning the state, so "Reset Defaults" — and any other
+    // core path that rewrites the field — keeps the radios honest.
+    select.addEventListener("change", () => {
+      for (const input of radios.querySelectorAll("input")) input.checked = input.value === select.value;
+    });
+
+    const toggle = field("receipts");
+    const sync = () => {
+      const on = !!toggle?.checked;
+      select.disabled = !on;
+      for (const input of radios.querySelectorAll("input")) input.disabled = !on;
+      const group = select.closest(".form-group");
+      if (group) group.style.opacity = on ? "" : "0.4";
+    };
+    toggle?.addEventListener("change", sync);
+    sync();
+  } catch (err) {
+    console.error(`${MODULE_ID} | rendering the Receipt Settings block failed — the choice `
+      + "stays available as a dropdown", err);
   }
 });
 
@@ -685,7 +858,8 @@ async function coinDialog(group, dir) {
   const [from, to] = deposit ? [partner, group] : [group, partner];
 
   try {
-    const moved = await moveCoin(from, to, result.amounts, { member: partner.name, dir });
+    const moved = await moveCoin(from, to, result.amounts,
+      { member: partner.name, memberUuid: partner.uuid, dir });
     if (!moved) return void ui.notifications.warn("Party Stash: no coin was selected to move.");
     ui.notifications.info(deposit
       ? `Deposited ${formatCoins(moved)} into ${group.name}.`
