@@ -1,8 +1,8 @@
 {
   "id": "fvtt-mod-partystash",
   "title": "Party Stash",
-  "description": "True move semantics for the shared party stash: dragging an item between a dnd5e Group actor and one of its members moves it instead of copying it, when you own both sides. The system's own drop pipeline does the work — the source is only deleted after the copy lands, consumable stacks merge, container contents come along — and Ctrl-drag still forces a plain copy. All other drags (PC to PC, NPC looting, compendium drops) keep stock behavior. Every transfer in or out of the stash — items and coin — is whispered to the GMs and the acting player as a receipt, an audit trail of who moved what.",
-  "version": "1.2.0",
+  "description": "True move semantics for the shared party stash: dragging an item between a dnd5e Group actor and one of its members moves it instead of copying it, when you own both sides. The system's own drop pipeline does the work — the source is only deleted after the copy lands, consumable stacks merge, container contents come along — and Ctrl-drag still forces a plain copy. All other drags (PC to PC, NPC looting, compendium drops) keep stock behavior. Coin, which can't be dragged, gets Deposit and Withdraw buttons on the group's currency row: a small dialog moves it denomination by denomination, capped at what the source is holding, and the purse row is read-only for players so the dialog is the one way coin moves. Every transfer in or out of the stash — items and coin — is whispered to the GMs and the acting player as a receipt, an audit trail of who moved what.",
+  "version": "1.3.0",
   "authors": [
     {
       "name": "Matthew Sippel"
@@ -10,6 +10,9 @@
   ],
   "esmodules": [
     "scripts/partystash.js"
+  ],
+  "styles": [
+    "styles/partystash.css"
   ],
   "compatibility": {
     "minimum": "13",
@@ -28,7 +31,7 @@
   },
   "url": "https://github.com/Txpple/fvtt-mod-partystash",
   "manifest": "https://github.com/Txpple/fvtt-mod-partystash/releases/latest/download/module.json",
-  "download": "https://github.com/Txpple/fvtt-mod-partystash/releases/download/v1.2.0/fvtt-mod-partystash.zip",
+  "download": "https://github.com/Txpple/fvtt-mod-partystash/releases/download/v1.3.0/fvtt-mod-partystash.zip",
   "readme": "https://github.com/Txpple/fvtt-mod-partystash#readme",
   "license": "MIT"
 }

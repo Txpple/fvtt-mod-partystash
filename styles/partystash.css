@@ -1,0 +1,138 @@
+/*
+ * Party Stash — styling for the coin window.
+ *
+ * Scoped to the group sheet's currency row and to the module's own dialog; nothing here is a
+ * bare element or dnd5e class selector, so the system's sheets are untouched everywhere else.
+ * Colours come from the dnd5e2 custom properties rather than literals, so the row keeps
+ * matching the sheet under a theme change.
+ */
+
+/* -------------------------------------------------- */
+/*  The currency row                                  */
+/* -------------------------------------------------- */
+
+/* The buttons take the dead space to the right of the five denomination boxes. */
+.dnd5e2.actor.group section.currency .partystash-coin {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-inline-start: auto;
+}
+
+.dnd5e2.actor.group section.currency .partystash-coin-button {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 0.25rem 0.6rem;
+  line-height: 1.2;
+  font-family: var(--dnd5e-font-roboto-condensed, var(--font-primary));
+  font-size: var(--font-size-11, 0.6875rem);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--color-text-light-highlight, #f0f0e0);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--dnd5e-color-gold, #9f9275);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.dnd5e2.actor.group section.currency .partystash-coin-button:hover {
+  background: var(--dnd5e-color-gold, #9f9275);
+  border-color: var(--dnd5e-color-gold, #9f9275);
+  color: var(--color-text-dark-primary, #191813);
+  text-shadow: none;
+}
+
+.dnd5e2.actor.group section.currency .partystash-coin-button i {
+  font-size: 0.75em;
+  opacity: 0.9;
+}
+
+/* Read-only for players: still legible, visibly not a field to type in. */
+.dnd5e2.actor.group section.currency input.partystash-locked {
+  cursor: default;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* -------------------------------------------------- */
+/*  The deposit / withdraw dialog                     */
+/* -------------------------------------------------- */
+
+.partystash-dialog .partystash-line {
+  margin: 0 0 0.5rem;
+}
+
+/* One box per denomination, coin glyph in front — the same five, in the same order, as the
+   sheet row the dialog was opened from. */
+.partystash-dialog .partystash-coins {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.35rem;
+}
+
+/* Denomination above, box below — at this width an inline label would crush the field, and
+   the whole point of the row is that you can tell at a glance which box is gold. */
+.partystash-dialog .partystash-coins label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.partystash-dialog .partystash-denom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: var(--font-size-11, 0.6875rem);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.partystash-dialog .partystash-coins input {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+/* A denomination the source simply doesn't hold — dimmed rather than hidden, so the row
+   always reads as the same five coins in the same order as the sheet. */
+.partystash-dialog .partystash-coins input:disabled {
+  opacity: 0.4;
+}
+
+.partystash-dialog .partystash-coins label:has(input:disabled) .partystash-denom {
+  opacity: 0.4;
+}
+
+.partystash-dialog .partystash-avail {
+  margin: 0 0 0.5rem;
+}
+
+.partystash-dialog .partystash-all {
+  width: 100%;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.partystash-dialog .partystash-all-note {
+  opacity: 0.7;
+  font-style: normal;
+}
+
+.partystash-dialog .partystash-all-note::before {
+  content: "(";
+}
+
+.partystash-dialog .partystash-all-note::after {
+  content: ")";
+}

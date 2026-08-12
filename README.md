@@ -32,10 +32,29 @@ modifiers still work everywhere:
 - **Ctrl-drag** (or Alt-drag) — force a plain **copy**, even to/from the stash,
 - **Shift-drag** — force a **move** for any drag dnd5e allows (e.g. looting an NPC).
 
+## Moving coin
+
+Items move by dragging; coin can't be dragged. So the group sheet's currency row gets two
+buttons — **Deposit** and **Withdraw** — and for players the purse fields themselves become
+**read-only**, along with the system's own currency-manager button, so the dialog is the one
+way coin moves in or out of the stash. GMs keep the stock editable row and the system button.
+
+The dialog is five boxes, one per denomination, each **capped at what the source is actually
+holding** — so an unaffordable transfer can't even be typed. An **Everything** button fills
+all five, which is the whole gesture after a fight. If you own more than one member, a picker
+chooses whose purse the coin comes from (or goes to).
+
+Coin moves **denomination by denomination**: two platinum leaving the stash arrive as two
+platinum, never twenty gold. Nobody's purse gets silently re-minted. The destination is
+credited before the source is debited, so a failure duplicates coin rather than destroying it
+— and the receipt shows it either way.
+
 ## Transfer receipts
 
-Every loot transfer in or out of a Group actor is recorded as a **chat whisper** to the
-GMs and the acting player — an audit trail of who moved what through the party stash.
+Every loot transfer in or out of a Group actor is posted to the **chat log for the whole
+table** — a shared record of who moved what through the party stash, which is what settles
+"who took the healing potion?" without anyone having to remember. (Loot Shelf's audit lines
+work the same way, so shop, chest and stash traffic read as one running account.)
 Receipts hook the document layer rather than the drag gesture, so everything is on the
 record: the module's own moves, forced Shift/Ctrl drags, GM stocking from the sidebar or
 a compendium, macros, and coin changes on the group sheet (as signed per-denomination
@@ -47,8 +66,12 @@ line, and the two halves of a move pair up so the line names the member involved
 gesture — a Ctrl-drag copy, sidebar stocking — the line is named after the acting user
 instead. Consumable stack merges show up as the quantity they added, not as a new item.
 
-Two world settings (**Game Settings → Configure Settings → Party Stash**) turn the move
-semantics and the receipts off independently.
+One gesture reads as one receipt, and a deposit or withdrawal names the member and the
+direction (*"Gren Greenmantle deposited 12 gp into The Party"*) rather than a signed delta —
+hand edits and GM adjustments still read as adjustments, because that is what they are.
+
+Three world settings (**Game Settings → Configure Settings → Party Stash**) turn the move
+semantics, the receipts, and the coin window off independently.
 
 ## Compatibility
 
