@@ -1,0 +1,10 @@
+{{!-- The Take button pointed back at the stash (see take-column.hbs for why
+      `always-interactive` is required). The click handler validates ownership of both
+      the character and the group; the column only renders for group members at all. --}}
+<div class="item-detail item-partystashStash" data-column-id="partystashStash">
+    <button type="button" class="partystash-stash-button always-interactive"
+            aria-label="Stash {{ item.name }}">
+        <i class="fa-solid fa-box-open" inert></i>
+        <span>Stash</span>
+    </button>
+</div>

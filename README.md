@@ -34,9 +34,10 @@ modifiers still work everywhere:
 
 Sibling of [Loot Shelf](https://github.com/Txpple/fvtt-mod-lootshelf) — Party Stash owns the
 shared party inventory; Loot Shelf owns loot on the ground and goods for sale. Neither needs
-the other installed, but they are built to the same manners — coin is never re-denominated,
-the destination is credited before the source is debited, and their receipts are configured
-the same way and read as one running account of the party's stuff.
+the other installed, but they are built to the same manners — a purse is never re-minted
+behind your back and both make change the same way when it must be made, the destination is
+credited before the source is debited, and their receipts are configured the same way and
+read as one running account of the party's stuff.
 
 ## Moving coin
 
@@ -45,15 +46,51 @@ buttons — **Deposit** and **Withdraw** — and for players the purse fields th
 **read-only**, along with the system's own currency-manager button, so the dialog is the one
 way coin moves in or out of the stash. GMs keep the stock editable row and the system button.
 
-The dialog is five boxes, one per denomination, each **capped at what the source is actually
-holding** — so an unaffordable transfer can't even be typed. An **Everything** button fills
+The dialog is five boxes, one per denomination, each **capped at what the source can
+afford** — so an unaffordable transfer can't even be typed. An **Everything** button fills
 all five, which is the whole gesture after a fight. If you own more than one member, a picker
 chooses whose purse the coin comes from (or goes to).
 
-Coin moves **denomination by denomination**: two platinum leaving the stash arrive as two
-platinum, never twenty gold. Nobody's purse gets silently re-minted. The destination is
-credited before the source is debited, so a failure duplicates coin rather than destroying it
-— and the receipt shows it either way.
+Coin the source holds loose moves **denomination by denomination**: two platinum leaving the
+stash arrive as two platinum, never twenty gold. But ask for coin the source *doesn't* hold
+loose — say 15 gp from a stash of 3 pp 15 sp — and the dialog **makes change**: the shortfall
+is minted for the destination and paid for out of the rest of the purse (small coins spent
+first, the smallest coin that covers the remainder broken, its change returned to the source
+in gp/sp/cp). You receive exactly the denominations you typed; only the source purse is
+re-composed, the dialog says so before it happens, and the receipt records that change was
+made. The destination is credited before the source is debited, so a failure duplicates coin
+rather than destroying it — and the receipt shows it either way.
+
+## Taking and splitting stacks
+
+dnd5e's own drag moves a **whole stack** — quantity isn't part of its drop pipeline at all.
+Party Stash fixes that both ways:
+
+- **Drag an item** between the stash and a member (any owned move the module already
+  handles) and a prompt asks first. For a stack it asks **how many** — defaulting to the
+  whole stack, so drag-and-Enter behaves exactly as before; choose fewer and the stack
+  splits, with the chosen amount merging into an existing stack of the same consumable
+  rather than opening a second row, and the rest staying put. A single item or a container
+  asks a plain confirmation instead, so a mis-drop never moves loot silently; containers
+  move whole, cargo and all.
+- **Every row of the group inventory gets a Take button.** Press it and the item goes to a
+  member you own — with the same quantity prompt when the stack is bigger than one
+  (defaulting to 1), a plain confirmation for single items and containers so a misclick
+  never moves loot silently, and a destination picker only when you own more than one
+  member. It is
+  Loot Shelf's shelf **Buy** gesture pointed the other way, and it exists because the drag
+  alternative is invisible: a player who can't find it reaches for the context menu's
+  Duplicate and mints "(Copy)" clones instead.
+- **Member character sheets get the mirror-image Stash button** on every inventory row,
+  moving the item into the group's inventory with the same quantity prompt. The column only
+  appears on characters that actually belong to a group — a loner's sheet is untouched.
+
+Both buttons sit past the system's own row controls, at the far right edge, and the group
+sheet drops the per-row equip toggle — nobody wields a sword out of the party's bag.
+
+Splits follow the same ordering as coin: the target is credited before the source is
+debited, so a failure duplicates items rather than destroying them — and the receipt names
+who took what either way.
 
 ## Transfer receipts
 
@@ -64,7 +101,8 @@ it to the transaction's participants and the DMs instead (see below).
 Receipts hook the document layer rather than the drag gesture, so everything is on the
 record: the module's own moves, forced Shift/Ctrl drags, GM stocking from the sidebar or
 a compendium, macros, and coin changes on the group sheet (as signed per-denomination
-deltas — coin is never re-denominated).
+deltas; a coin-dialog transfer instead names the member and what they moved, and notes
+when coin was converted to make change).
 
 One gesture reads as one receipt: a container arriving with its contents is a single
 line, and the two halves of a move pair up so the line names the member involved
@@ -86,6 +124,8 @@ hand edits and GM adjustments still read as adjustments, because that is what th
 | Post transfer receipts | on | Turn off for no ledger at all. |
 | Receipts | broadcast to the server | Who reads a receipt — see below. |
 | Deposit / withdraw coin window | on | Turn off to restore the stock currency row for everyone. |
+| Take button on the group inventory | on | Turn off to remove the Take column. The drag split prompt rides the item-transfer toggle instead. |
+| Stash button on member character sheets | on | Turn off to remove the Stash column from character sheets. |
 
 **Receipt Settings** is a choice of two, and Loot Shelf offers the same one, so a table can
 set one policy across both modules:

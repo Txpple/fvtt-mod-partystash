@@ -44,7 +44,18 @@
  * WITHDRAW buttons opening a small dialog, and for players the purse fields themselves go
  * READ-ONLY (the system's own "Manage Currency" button is removed with them) so the dialog
  * is the one way coin moves. GMs keep the stock editable row and the system button as an
- * admin escape hatch. See the coin section below.
+ * admin escape hatch. v1.5 teaches the dialog to make change: asking for coin the source
+ * doesn't hold loose converts the rest of its purse to cover it, Loot Shelf's
+ * `planDeduction` manners. See the coin section below.
+ *
+ * v1.6 does the same favor for stacks that v1.3 did for coin. dnd5e's drop pipeline moves
+ * the WHOLE item document — quantity is not a concept anywhere in it — so "take one
+ * Antitoxin from the stash's stack of four" was not a gesture the sheet had, and a player
+ * hunting for one found the context menu's Duplicate instead (the "(Copy)(Copy)" incident,
+ * 2026-08-25). Now a member↔group move of a stacked item asks "how many?", the group
+ * inventory grows a per-row TAKE button — Loot Shelf's shelf-Buy gesture pointed the other
+ * way — and member character sheets grow the mirror-image STASH button, gated on actually
+ * belonging to a group. See the stacks section below.
  *
  * Implemented as a wrap of BaseActorSheet#_defaultDropBehavior — the single seam where
  * dnd5e decides a drag's default behavior (same wrap style as fvtt-mod-autoexplore's
@@ -119,10 +130,48 @@ Hooks.once("init", () => {
     type: Boolean,
     default: true
   });
+
+  game.settings.register(MODULE_ID, "take", {
+    name: "Take button on the group inventory",
+    hint: "Put a Take button on every item row of a group actor's inventory: press it to "
+      + "move the item to a member you own, with a quantity prompt when the stack is bigger "
+      + "than one. Turn this off to remove the column.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
+
+  game.settings.register(MODULE_ID, "stash", {
+    name: "Stash button on member character sheets",
+    hint: "The same button pointed the other way: every inventory row on a character sheet "
+      + "gets a Stash button when that character belongs to a group, moving the item into "
+      + "the group's inventory with the same quantity prompt. Characters in no group keep "
+      + "the stock row. Turn this off to remove the column.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
 });
 
 /** Recently-warned blocked drags, keyed "itemUuid->targetUuid" -> timestamp. */
 const warned = new Map();
+
+/**
+ * The effective target of a drop: the sheet's inventory actor — except on a group sheet,
+ * where dropping onto a member's row hands the item to that member (the sheet's own
+ * routing). Shared by the verdict below and the v1.6 split prompt.
+ */
+function dropTarget(sheet, event) {
+  let target = sheet.inventorySource;
+  if (sheet.actor?.type === "group") {
+    const rowUuid = event.target?.closest?.("[data-uuid]")?.dataset?.uuid;
+    const rowDoc = rowUuid ? fromUuidSync(rowUuid) : null;
+    if (rowDoc instanceof Actor) target = rowDoc;
+  }
+  return target;
+}
 
 /**
  * Judge a drag against the stash scope rules in the header.
@@ -140,14 +189,7 @@ function stashVerdict(sheet, event, data) {
   if (!(item instanceof Item) || !(source instanceof Actor)) return null;
   if (!item.system?.schema?.fields?.quantity) return null; // physical items only
 
-  // The effective target: the sheet's inventory actor — except on a group sheet, where
-  // dropping onto a member's row hands the item to that member (the sheet's own routing).
-  let target = sheet.inventorySource;
-  if (sheet.actor?.type === "group") {
-    const rowUuid = event.target?.closest?.("[data-uuid]")?.dataset?.uuid;
-    const rowDoc = rowUuid ? fromUuidSync(rowUuid) : null;
-    if (rowDoc instanceof Actor) target = rowDoc;
-  }
+  const target = dropTarget(sheet, event);
   if (!(target instanceof Actor) || target === source) return null;
 
   // Exactly one end is a group, and the other end is one of ITS members.
@@ -200,6 +242,62 @@ Hooks.once("setup", () => {
       return fallback;
     }
   };
+
+  // v1.6 — the split prompt sits at _onDropItem, where a move drop becomes concrete. TWO
+  // wraps with one shared guard: the group sheet's override routes a drop on a member's
+  // row PAST its parent implementation (straight to the member sheet's
+  // _onDropCreateItems), so wrapping the base class alone would miss exactly the drop the
+  // group sheet invented for handing things out. The event is marked on first sight so
+  // the group wrap delegating to the (also wrapped) base method asks only once.
+  const Group = globalThis.dnd5e?.applications?.actor?.GroupActorSheet;
+  for (const Cls of new Set([Base, Group].filter(Boolean))) {
+    const origDrop = Cls.prototype._onDropItem;
+    if (!origDrop) continue;
+    Cls.prototype._onDropItem = async function (event, item) {
+      try {
+        if (await maybeSplitMove(this, event, item)) return;
+      } catch (err) {
+        console.error(`${MODULE_ID} | split check failed — the drop falls through whole`, err);
+      }
+      return origDrop.call(this, event, item);
+    };
+  }
+
+  // v1.6 — the Take and Stash columns (see the stacks section). Appended to the sheets'
+  // own section columns so the system's grid machinery lays them out. Order 1100 puts
+  // them past the system's controls column (order 1000) — the FURTHEST RIGHT cell, the
+  // owner's call on 2026-08-26. The matching width rules in partystash.css are REQUIRED —
+  // a column id without CSS collapses to zero width (Loot Shelf handoff, landmine #2).
+  const injectColumn = (Cls, setting, id, template, gate) => {
+    if (!Cls) return;
+    const origSections = Cls.prototype._configureInventorySections;
+    Cls.prototype._configureInventorySections = async function (sections) {
+      await origSections?.call(this, sections);
+      try {
+        if (!game.settings.get(MODULE_ID, setting)) return;
+        if (gate && !gate(this)) return;
+        const column = { id, width: 84, order: 1100, priority: 100, label: "", template };
+        for (const s of sections) if (Array.isArray(s.columns)) s.columns = [...s.columns, column];
+      } catch (err) {
+        console.error(`${MODULE_ID} | adding the ${id} column failed`, err);
+      }
+    };
+  };
+  injectColumn(Group, "take", "partystashTake",
+    `modules/${MODULE_ID}/templates/take-column.hbs`);
+  // The character sheet only grows a Stash button when the character is actually a member
+  // of some group — a loner's inventory keeps its stock row.
+  injectColumn(globalThis.dnd5e?.applications?.actor?.CharacterActorSheet, "stash", "partystashStash",
+    `modules/${MODULE_ID}/templates/stash-column.hbs`,
+    sheet => isGroupMember(sheet.actor));
+
+  // Column templates render as preloaded Handlebars partials — without this the cell
+  // comes up empty, not errored.
+  const load = foundry.applications?.handlebars?.loadTemplates ?? loadTemplates;
+  load([
+    `modules/${MODULE_ID}/templates/take-column.hbs`,
+    `modules/${MODULE_ID}/templates/stash-column.hbs`
+  ]).catch(err => console.error(`${MODULE_ID} | preloading the column templates failed`, err));
 });
 
 /* -------------------------------------------------- */
@@ -235,7 +333,9 @@ Hooks.once("setup", () => {
  *     stash is also worth a line in the ledger.
  *
  * Coin is loot too: currency changes on a group actor get their own receipt with signed
- * per-denomination deltas — no re-denomination, matching Loot Shelf's coin manners.
+ * per-denomination deltas. A deposit/withdraw through the coin dialog instead names the
+ * member and the coins they moved — and says so when the dialog converted coin to make
+ * change (the one sanctioned re-denomination; see the coin section).
  */
 
 const RECEIPT_WINDOW = 500;
@@ -511,7 +611,8 @@ Hooks.on("updateActor", (actor, changes, options, userId) => {
       postReceipt([`<strong>${transfer.member}</strong> `
         + (transfer.dir === "deposit"
           ? `deposited <strong>${moved}</strong> into <strong>${actor.name}</strong>.`
-          : `withdrew <strong>${moved}</strong> from <strong>${actor.name}</strong>.`)],
+          : `withdrew <strong>${moved}</strong> from <strong>${actor.name}</strong>.`)
+        + (transfer.converted ? " <em>Coin was converted to make change.</em>" : "")],
         userId, member instanceof Actor ? [member] : []);
       return;
     }
@@ -562,6 +663,7 @@ Hooks.on("renderSettingsConfig", (app, element) => {
     divider("enabled", "Item Transfers");
     divider("receipts", "Receipt Settings");
     divider("coin", "Coin Window");
+    divider("take", "Take & Stash Buttons");
 
     const radios = document.createElement("div");
     radios.className = "partystash-receipt-modes";
@@ -619,14 +721,25 @@ Hooks.on("renderSettingsConfig", (app, element) => {
  * had. So the stash grows its own affordance: two labelled buttons on the group's currency
  * row, and one dialog behind them.
  *
- * COIN MANNERS, borrowed intact from fvtt-mod-lootshelf (`takeCurrencyFromContainer`):
- * coin moves DENOMINATION BY DENOMINATION. Two platinum leaving the stash arrive as two
- * platinum, not twenty gold. That is why the dialog is five boxes rather than one "N gp"
- * field — a single field would have to break and re-mint somebody's coins to satisfy it, and
- * silently re-denominating a player's purse is exactly the rudeness Loot Shelf's
- * `planDeduction` is careful to avoid when making change. Five boxes also make the
- * affordability rule self-evident: each box is capped at the coins the source actually holds,
- * so an unaffordable transfer cannot be typed in the first place.
+ * COIN MANNERS, borrowed from fvtt-mod-lootshelf (`takeCurrencyFromContainer`): coin the
+ * source actually holds moves DENOMINATION BY DENOMINATION. Two platinum leaving the stash
+ * arrive as two platinum, not twenty gold, and a purse is never re-composed just to satisfy
+ * a transfer it could have paid literally.
+ *
+ * Through v1.4 that rule was absolute: each box was capped at the loose coins the source
+ * held, full stop. It met reality on 2026-08-26 — a player wanted 15 gp out of a stash
+ * holding 3 pp 15 sp, found the GP box greyed out, and had to do the exchange arithmetic by
+ * hand. So since v1.5 the dialog MAKES CHANGE: each box is capped by what the purse's total
+ * VALUE can afford, coins held loose still move as themselves first, and only the shortfall
+ * is minted for the destination and paid for out of the rest of the source's purse via
+ * `planDeduction` — Loot Shelf's change-making, ported verbatim so the two modules convert
+ * coin identically (small denominations spent first in exact multiples, then the smallest
+ * coin that covers the remainder is broken, change returned to the SOURCE in gp/sp/cp).
+ * The destination always receives exactly the denominations typed; only the source's purse
+ * is ever re-composed, that being the price of asking for coin it doesn't hold loose. The
+ * dialog says so before it happens, and the receipt records that change was made.
+ * Affordability still cannot be mis-typed: the five boxes share the purse's total value as
+ * one budget, and the box being edited is clamped live to what the others leave affordable.
  *
  * ORDERING, the family convention (fail open, never destructive): the destination is credited
  * BEFORE the source is debited. A failure between the two duplicates coin, which a GM can see
@@ -643,6 +756,8 @@ Hooks.on("renderSettingsConfig", (app, element) => {
 const RATES = { pp: 1000, gp: 100, ep: 50, sp: 10, cp: 1 };
 /** Denomination order as the dnd5e currency row displays it. */
 const DENOMS = ["pp", "gp", "ep", "sp", "cp"];
+/** DENOMS smallest-first — the spend order when making change. */
+const ASCENDING = [...DENOMS].reverse();
 
 /** A sanitized copy of a currency object — non-negative integers, all five keys. */
 function coins(currency) {
@@ -655,6 +770,36 @@ function coins(currency) {
 function totalCopper(currency) {
   const c = coins(currency);
   return DENOMS.reduce((total, d) => total + c[d] * RATES[d], 0);
+}
+
+/**
+ * Plan paying `cost` copper out of a currency object, or null if it can't be afforded.
+ * Loot Shelf's `planDeduction`, ported verbatim (same name, same behavior) so the two
+ * modules make change identically: small denominations are spent first (exact multiples
+ * only), then the smallest remaining coin that covers what's left is broken, with the
+ * change returned in gp/sp/cp. The result is the complete post-payment currency object.
+ */
+function planDeduction(currency, cost) {
+  const c = coins(currency);
+  cost = Math.max(0, Math.floor(cost));
+  if (totalCopper(c) < cost) return null;
+  let remaining = cost;
+  for (const coin of ASCENDING) {
+    const spend = Math.min(c[coin], Math.floor(remaining / RATES[coin]));
+    c[coin] -= spend;
+    remaining -= spend * RATES[coin];
+  }
+  if (remaining > 0) {
+    // After the exact pass every held coin is worth more than the remainder, and the
+    // affordability check guarantees one exists — break the smallest and take change.
+    const coin = ASCENDING.find(k => c[k] > 0 && RATES[k] >= remaining);
+    c[coin] -= 1;
+    const change = RATES[coin] - remaining;
+    c.gp += Math.floor(change / 100);
+    c.sp += Math.floor((change % 100) / 10);
+    c.cp += change % 10;
+  }
+  return c;
 }
 
 /**
@@ -682,21 +827,42 @@ function coinPartners(group) {
 }
 
 /**
- * Move coin between two actors, denomination by denomination, crediting before debiting.
- * Amounts are clamped to what the source actually holds, so a stale dialog (someone else
- * spent the purse while it sat open) moves what is left rather than minting the difference.
- * @returns {object|null} The coins actually moved, or null if that came to nothing.
+ * Move coin between two actors, crediting before debiting. Coins the source holds loose
+ * move as themselves, never re-minted; a shortfall in a requested denomination is minted
+ * for the destination and paid for out of the rest of the source's purse via
+ * `planDeduction`, the change landing back in the source. The destination thus receives
+ * exactly the denominations asked for, and only the source's purse is ever re-composed.
+ * Amounts are clamped to what the source can AFFORD (not merely what it holds), so a stale
+ * dialog (someone else spent the purse while it sat open) moves what is left rather than
+ * minting value from nothing.
+ * @returns {{moved: object, converted: boolean}|null} The coins the destination received
+ *   and whether any were made by converting the source's coin — or null for a no-op.
  */
 async function moveCoin(from, to, amounts, receipt) {
-  const fromPurse = coins(from.system?.currency);
+  let fromPurse = coins(from.system?.currency);
   const toPurse = coins(to.system?.currency);
-  const moving = {};
-  for (const d of DENOMS) moving[d] = Math.min(fromPurse[d], Math.max(0, Math.floor(Number(amounts?.[d]) || 0)));
-  if (totalCopper(moving) <= 0) return null;
+  const moved = {};
+  // First pass: what the source holds loose moves literally.
   for (const d of DENOMS) {
-    toPurse[d] += moving[d];
-    fromPurse[d] -= moving[d];
+    moved[d] = Math.min(fromPurse[d], Math.max(0, Math.floor(Number(amounts?.[d]) || 0)));
+    fromPurse[d] -= moved[d];
   }
+  // Second pass: shortfalls are made by converting the rest of the purse. Change from a
+  // broken coin returns to the purse in gp/sp/cp, so a later denomination's shortfall may
+  // be paid partly out of an earlier one's change — value is conserved throughout.
+  let converted = false;
+  for (const d of DENOMS) {
+    const short = Math.max(0, Math.floor(Number(amounts?.[d]) || 0)) - moved[d];
+    const mint = Math.min(short, Math.floor(totalCopper(fromPurse) / RATES[d]));
+    if (mint <= 0) continue;
+    const paid = planDeduction(fromPurse, mint * RATES[d]);
+    if (!paid) continue; // affordability was just checked — but never mint on a miss
+    fromPurse = paid;
+    moved[d] += mint;
+    converted = true;
+  }
+  if (totalCopper(moved) <= 0) return null;
+  for (const d of DENOMS) toPurse[d] += moved[d];
   // The receipt rides on whichever update touches the GROUP actor — that is the one the
   // currency receipt hook watches — so tag both and let the hook read whichever fires.
   //
@@ -705,10 +871,10 @@ async function moveCoin(from, to, amounts, receipt) {
   // object arrives at the second update already carrying the FIRST actor's currency snapshot.
   // That produced a bogus second receipt reading "Gren deposited 2 pp 5 gp into Gren" — caught
   // in the v1.3 ledger review.
-  const context = () => ({ [MODULE_ID]: { transfer: { ...receipt, amounts: moving } } });
+  const context = () => ({ [MODULE_ID]: { transfer: { ...receipt, amounts: moved, converted } } });
   await to.update({ "system.currency": toPurse }, context());
   await from.update({ "system.currency": fromPurse }, context());
-  return moving;
+  return { moved, converted };
 }
 
 /**
@@ -729,6 +895,9 @@ async function coinDialog(group, dir) {
 
   const esc = Handlebars.escapeExpression;
   const purseOf = actor => coins(actor.system?.currency);
+  // A box's cap is what the purse's total VALUE affords in that denomination — not the loose
+  // coins held. The difference is what `moveCoin` makes by converting (see the header).
+  const cap = (purse, d) => Math.floor(totalCopper(purse) / RATES[d]);
   const label = { pp: "Platinum", gp: "Gold", ep: "Electrum", sp: "Silver", cp: "Copper" };
 
   // The source caps the boxes: your own purse when depositing, the stash when withdrawing.
@@ -752,7 +921,7 @@ async function coinDialog(group, dir) {
   const boxes = DENOMS.map(d =>
     `<label aria-label="${label[d]}" data-denom="${d}">`
     + `<span class="partystash-denom" data-tooltip="${label[d]}">${d}</span>`
-    + `<input type="number" name="${d}" value="0" min="0" max="${purseOf(initial)[d]}" step="1">`
+    + `<input type="number" name="${d}" value="0" min="0" max="${cap(purseOf(initial), d)}" step="1">`
     + `</label>`
   ).join("");
 
@@ -767,6 +936,7 @@ async function coinDialog(group, dir) {
     + partnerField
     + `<div class="partystash-coins">${boxes}</div>`
     + `<p class="partystash-avail hint"></p>`
+    + `<p class="partystash-convert hint" hidden></p>`
     + `<button type="button" class="partystash-all">Everything <em class="partystash-all-note"></em></button>`;
 
   const result = await foundry.applications.api.DialogV2.wait({
@@ -808,40 +978,73 @@ async function coinDialog(group, dir) {
         const form = root.querySelector("form") ?? root;
         const select = form.elements.partner;
         const avail = form.querySelector(".partystash-avail");
+        const convertEl = form.querySelector(".partystash-convert");
         const allBtn = form.querySelector(".partystash-all");
         const allNote = form.querySelector(".partystash-all-note");
 
         const currentPartner = () => partners.find(p => p.id === select?.value) ?? partners[0];
         const sourcePurse = () => purseOf(sourceFor(currentPartner()));
+        const holder = () => (deposit ? currentPartner().name : group.name);
+
+        // The five boxes share one budget — the purse's total value. Clamp each so the
+        // running total stays affordable, visiting the box being edited LAST so a fresh
+        // keystroke yields to what was already typed instead of silently rewriting it.
+        const fitBudget = edited => {
+          const purse = sourcePurse();
+          let left = totalCopper(purse);
+          const order = [...DENOMS.filter(d => d !== edited), ...(edited ? [edited] : [])];
+          for (const d of order) {
+            const input = form.elements[d];
+            if (!input) continue;
+            const want = Math.max(0, Math.floor(input.valueAsNumber || 0));
+            const allowed = Math.min(want, Math.floor(left / RATES[d]));
+            if (allowed !== (input.valueAsNumber || 0)) input.value = String(allowed);
+            left -= allowed * RATES[d];
+          }
+        };
+
+        // Say that change will be made BEFORE it happens — the one moment the dialog
+        // re-composes a purse should never be a surprise found in the receipt.
+        const convertNote = () => {
+          if (!convertEl) return;
+          const purse = sourcePurse();
+          const minted = DENOMS.filter(d => (form.elements[d]?.valueAsNumber || 0) > purse[d]);
+          convertEl.hidden = !minted.length;
+          convertEl.textContent = minted.length
+            ? `${holder()} doesn't hold that much loose ${minted.join(" or ")} — other coin `
+              + "will be converted to make change."
+            : "";
+        };
 
         const sync = () => {
           const purse = sourcePurse();
           for (const d of DENOMS) {
             const input = form.elements[d];
             if (!input) continue;
-            input.max = String(purse[d]);
-            // A coin the source doesn't hold is dimmed rather than dropped, so the row always
-            // reads as the same five denominations in the same order as the sheet.
-            input.disabled = purse[d] <= 0;
-            if ((input.valueAsNumber || 0) > purse[d]) input.value = String(purse[d]);
+            const most = cap(purse, d);
+            input.max = String(most);
+            // A denomination the purse can't afford ONE coin of is dimmed rather than
+            // dropped, so the row always reads as the same five in the sheet's order.
+            input.disabled = most <= 0;
+            if ((input.valueAsNumber || 0) > most) input.value = String(most);
           }
-          const holder = deposit ? currentPartner().name : group.name;
-          if (avail) avail.textContent = `${holder} has ${formatCoins(purse)}.`;
+          fitBudget(null);
+          if (avail) avail.textContent = `${holder()} has ${formatCoins(purse)}.`;
           if (allNote) allNote.textContent = formatCoins(purse);
           if (allBtn) allBtn.disabled = totalCopper(purse) <= 0;
+          convertNote();
         };
 
         select?.addEventListener("change", sync);
         allBtn?.addEventListener("click", () => {
           const purse = sourcePurse();
           for (const d of DENOMS) if (form.elements[d]) form.elements[d].value = String(purse[d]);
+          convertNote(); // everything-as-held is literal by construction — the note hides
         });
         for (const d of DENOMS) {
           form.elements[d]?.addEventListener("change", () => {
-            const input = form.elements[d];
-            const max = Number(input.max) || 0;
-            if ((input.valueAsNumber || 0) > max) input.value = String(max);
-            if ((input.valueAsNumber || 0) < 0) input.value = "0";
+            fitBudget(d);
+            convertNote();
           });
         }
         sync();
@@ -858,17 +1061,346 @@ async function coinDialog(group, dir) {
   const [from, to] = deposit ? [partner, group] : [group, partner];
 
   try {
-    const moved = await moveCoin(from, to, result.amounts,
+    const outcome = await moveCoin(from, to, result.amounts,
       { member: partner.name, memberUuid: partner.uuid, dir });
-    if (!moved) return void ui.notifications.warn("Party Stash: no coin was selected to move.");
-    ui.notifications.info(deposit
-      ? `Deposited ${formatCoins(moved)} into ${group.name}.`
-      : `Withdrew ${formatCoins(moved)} from ${group.name} for ${partner.name}.`);
+    if (!outcome) return void ui.notifications.warn("Party Stash: no coin was selected to move.");
+    ui.notifications.info((deposit
+      ? `Deposited ${formatCoins(outcome.moved)} into ${group.name}.`
+      : `Withdrew ${formatCoins(outcome.moved)} from ${group.name} for ${partner.name}.`)
+      + (outcome.converted ? " Coin was converted to make change." : ""));
   } catch (err) {
     console.error(`${MODULE_ID} | moving coin failed`, err);
     ui.notifications.error(`Party Stash: that coin transfer failed (${err.message}).`);
   }
 }
+
+/* -------------------------------------------------- */
+/*  Stacks — split moves & the Take column            */
+/* -------------------------------------------------- */
+
+/**
+ * dnd5e's drop pipeline moves the whole item document; quantity is not a concept anywhere
+ * in it. The context menu offers no split either — its Duplicate mints a "{name} (Copy)"
+ * clone, which is exactly what a player reaching for one Antitoxin out of four found on
+ * 2026-08-25 (three times). Two affordances fix that, per the owner's call on 2026-08-26:
+ *
+ * SPLIT PROMPT — every owned member↔group MOVE drop asks first (no modifier key). A
+ * stacked item asks "how many?", defaulting to the WHOLE stack, so the old gesture is
+ * still drag-and-Enter; choosing fewer performs a split instead of the stock move, and
+ * choosing everything falls through to the untouched stock pipeline. A single item or a
+ * container asks a plain yes/no instead (extended from the buttons to drags by the owner,
+ * 2026-08-26) — yes falls through to the stock move, no drops nothing. Only the module's
+ * own move verdict prompts; forced Ctrl-copies stay silent stock behavior.
+ *
+ * TAKE COLUMN — every row of the group inventory gets a Take button, Loot Shelf's
+ * shelf-Buy gesture pointed the other way: press it, get a quantity prompt only when the
+ * stack is bigger than one (defaulting to 1 — the button gesture is "grab some", where
+ * the drag gesture is "move this stack" and defaults to all, both matching the vendor's
+ * manners). Destination rules are the coin dialog's: the members you own, assigned
+ * character first, a picker only when there is a real choice. Containers move whole,
+ * cargo and all. Both button columns sit PAST the system's controls column — the
+ * furthest-right cell, the owner's call on 2026-08-26 — and the group sheet hides the
+ * rows' equip toggle (partystash.css): nobody wields a sword out of the party's bag.
+ *
+ * STASH COLUMN — the same button on member CHARACTER sheets, pointed back: every
+ * inventory row grows a Stash button that moves the item into the group's inventory,
+ * same quantity prompt, destination picker only for a character in several groups. The
+ * column is membership-gated — a character in no group keeps the stock rows, so the
+ * busiest sheet in the game only pays the width when the button can do something.
+ *
+ * The split itself follows the family ordering — CREDIT BEFORE DEBIT: the chosen amount
+ * lands on the target first (merging into an existing stack the way dnd5e's own drop path
+ * stacks consumables), then the source stack is reduced, or deleted when all of it went.
+ * A failure between the two duplicates items, never destroys them. Receipts need no new
+ * wiring: the quantity-delta and create/delete hooks already pair the two halves into
+ * "Bob took 1 × Antitoxin from The Party".
+ */
+
+/** An item's stack size — physical items default to 1, never less. */
+function stackCount(item) {
+  return Math.max(1, Math.floor(Number(item?.system?.quantity) || 1));
+}
+
+/**
+ * "<strong>The Party</strong> inventory" or "the <strong>Wardens</strong> inventory" —
+ * the article joins only when the name doesn't already open with one, so any actor name
+ * slots into the dialogs' questions without a possessive or a stutter ("the The Party").
+ */
+function inventoryLabel(name) {
+  const bold = `<strong>${Handlebars.escapeExpression(name)}</strong> inventory`;
+  return /^the\s/i.test(name ?? "") ? bold : `the ${bold}`;
+}
+
+/**
+ * Move `n` of `item` to `target`, credit before debit. Containers ignore `n` and move
+ * whole with their contents (the stock createWithContents path).
+ */
+async function moveStack(item, target, n) {
+  const max = stackCount(item);
+  n = Math.min(max, Math.max(1, Math.floor(Number(n) || 1)));
+
+  if (item.type === "container") {
+    const Item5e = item.constructor;
+    const toCreate = await Item5e.createWithContents([item]);
+    await Item5e.createDocuments(toCreate, { parent: target, keepId: true });
+    await item.delete({ deleteContents: true });
+    return max;
+  }
+
+  const data = item.toObject();
+  delete data._id;
+  delete data.folder;
+  data.sort = 0;
+  const sys = data.system ?? {};
+  if ("attuned" in sys) sys.attuned = false;
+  if ("equipped" in sys) sys.equipped = false;
+  if ("container" in sys) sys.container = null;
+  sys.quantity = n;
+
+  // Merge into an existing stack the way dnd5e's own _onDropStackConsumables does
+  // (consumables with a compendium source, same name, loose in the inventory), so a taken
+  // Antitoxin lands ON the member's stack instead of opening a second row. Any failure
+  // here degrades to a plain create — a duplicate row, never a lost item.
+  let similar = null;
+  try {
+    const sourceId = data._stats?.compendiumSource ?? data.flags?.core?.sourceId;
+    if (data.type === "consumable" && sourceId) {
+      similar = target.sourcedItems?.get(sourceId, { legacy: false })
+        ?.filter(i => (i.system.container === null) && (i.name === data.name))?.first() ?? null;
+    }
+  } catch {
+    similar = null;
+  }
+  if (similar) await similar.update({ "system.quantity": stackCount(similar) + n });
+  else await target.createEmbeddedDocuments("Item", [data]);
+
+  if (n >= max) await item.delete();
+  else await item.update({ "system.quantity": max - n });
+  return n;
+}
+
+/**
+ * Should this drop become a split instead of a stock move? Runs inside the _onDropItem
+ * wraps (see setup). Returns true when the drop was fully handled here — split performed,
+ * or prompt cancelled — and false to fall through to the stock pipeline.
+ */
+async function maybeSplitMove(sheet, event, item) {
+  if (event._partystashAsked) return false; // the group wrap delegates to the base wrap — ask once
+  event._partystashAsked = true;
+  if (!game.settings.get(MODULE_ID, "enabled")) return false;
+  if (event._behavior !== "move") return false;
+  if (!(item instanceof Item)) return false;
+  if (stashVerdict(sheet, event, { type: "Item", uuid: item.uuid }) !== "move") return false;
+
+  const target = dropTarget(sheet, event);
+  const taking = item.parent?.type === "group";
+  const max = stackCount(item);
+  const container = item.type === "container";
+  const askQty = !container && max > 1;
+  const esc = Handlebars.escapeExpression;
+  // Same voice as the button dialogs: a question naming both ends, the detail as its own
+  // sentence.
+  // "<Name> inventory" with a joining article as needed, never a possessive — see
+  // inventoryLabel. Owner-picked phrasing, 2026-08-26.
+  const question = (taking
+    ? `Take <strong>${esc(item.name)}</strong> from ${inventoryLabel(item.parent.name)}?`
+    : `Put <strong>${esc(item.name)}</strong> in ${inventoryLabel(target?.name ?? "party stash")}?`)
+    + (askQty ? ` There are ${max}.` : container ? " It moves with its contents." : "");
+  const verb = taking ? "Take" : "Stash";
+
+  // A single item or a container has no quantity to ask about, but the drop still
+  // confirms (owner's call, 2026-08-26 — same as the buttons): yes falls through to the
+  // stock move, no swallows the drop.
+  if (!askQty) {
+    const ok = await foundry.applications.api.DialogV2.wait({
+      classes: ["partystash-dialog"],
+      window: { title: `${verb} ${item.name}`, icon: "fa-solid fa-hand-holding" },
+      position: { width: 360 },
+      content: `<p>${question}</p>`,
+      buttons: [
+        { action: "go", label: verb, icon: "fa-solid fa-hand-holding", default: true, callback: () => true },
+        { action: "cancel", label: "Cancel" }
+      ],
+      rejectClose: false
+    });
+    return ok !== true; // confirmed — let the stock pipeline move it whole
+  }
+
+  const result = await foundry.applications.api.DialogV2.wait({
+    classes: ["partystash-dialog"],
+    window: { title: taking ? "Take how many?" : "Stash how many?", icon: "fa-solid fa-hand-holding" },
+    position: { width: 360 },
+    content: `<p>${question}</p>`
+      + `<div class="form-group"><label>Quantity</label><div class="form-fields">`
+      + `<input type="number" name="qty" value="${max}" min="1" max="${max}" step="1" autofocus>`
+      + `</div><p class="hint">Up to ${max}. The rest stays put.</p></div>`,
+    buttons: [
+      {
+        action: "go", label: verb, icon: "fa-solid fa-hand-holding", default: true,
+        callback: (ev, button) =>
+          Math.max(1, Math.min(max, Math.floor(button.form?.elements?.qty?.valueAsNumber || max)))
+      },
+      { action: "cancel", label: "Cancel" }
+    ],
+    rejectClose: false
+  });
+  if (result == null || result === "cancel") return true; // cancelled — swallow the drop
+  if (result >= max) return false;                        // whole stack — stock pipeline
+  await moveStack(item, target, result);
+  return true;
+}
+
+/**
+ * The shared button dialog: an optional destination picker (only when there is a real
+ * choice) and an optional quantity box (vendor manners — it only appears when the stack
+ * is bigger than one, and defaults to 1). The dialog itself ALWAYS shows: for a stack it
+ * is the quantity prompt, and for a single item or a container it is a plain
+ * confirmation — the owner's call on 2026-08-26, so a misclick on a row button never
+ * relocates loot silently. Returns { partner, qty } or null on cancel.
+ */
+async function buttonPrompt({ title, verb, icon, question, item, partners, partnerLabel }) {
+  const max = stackCount(item);
+  const container = item.type === "container";
+  const askQty = !container && max > 1;
+
+  const esc = Handlebars.escapeExpression;
+  // The caller words the question ("Take X from Y?"); the stack or cargo detail rides
+  // along as a second sentence so the line reads like a person asking, not a label.
+  const detail = askQty ? ` There are ${max}.` : container ? " It moves with its contents." : "";
+  const partnerField = partners.length > 1
+    ? `<div class="form-group"><label>${partnerLabel}</label><div class="form-fields"><select name="partner">`
+      + partners.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")
+      + `</select></div></div>`
+    : `<input type="hidden" name="partner" value="${partners[0].id}">`;
+  const qtyField = askQty
+    ? `<div class="form-group"><label>Quantity</label><div class="form-fields">`
+      + `<input type="number" name="qty" value="1" min="1" max="${max}" step="1" autofocus>`
+      + `</div><p class="hint">Up to ${max}.</p></div>`
+    : "";
+  const result = await foundry.applications.api.DialogV2.wait({
+    classes: ["partystash-dialog"],
+    window: { title, icon },
+    position: { width: 360 },
+    content: `<p>${question}${detail}</p>` + partnerField + qtyField,
+    buttons: [
+      {
+        action: "go", label: verb, icon, default: true,
+        callback: (ev, button) => ({
+          partnerId: button.form?.elements?.partner?.value,
+          qty: Math.max(1, Math.min(max, Math.floor(button.form?.elements?.qty?.valueAsNumber || 1)))
+        })
+      },
+      { action: "cancel", label: "Cancel" }
+    ],
+    rejectClose: false
+  });
+  if (!result || typeof result !== "object") return null;
+  return {
+    partner: partners.find(p => p.id === result.partnerId) ?? partners[0],
+    qty: container ? max : (askQty ? result.qty : 1)
+  };
+}
+
+/**
+ * The Take button's click — the button-shaped withdrawal. Checks mirror the coin
+ * dialog's: own the group, own at least one member.
+ */
+async function takeDialog(group, item) {
+  const partners = coinPartners(group);
+  if (!partners.length) {
+    return void ui.notifications.warn(
+      `Party Stash: you don't own any member of ${group.name}, so you can't take from it.`);
+  }
+  if (!group.isOwner) {
+    return void ui.notifications.warn(
+      `Party Stash: you don't own ${group.name}, so you can't take from it. Ask your GM.`);
+  }
+  const esc = Handlebars.escapeExpression;
+  const picked = await buttonPrompt({
+    title: `Take from ${group.name}`, verb: "Take", icon: "fa-solid fa-hand-holding",
+    question: `Take <strong>${esc(item.name)}</strong> from ${inventoryLabel(group.name)}?`,
+    item, partners, partnerLabel: "To"
+  });
+  if (!picked) return;
+  try {
+    const moved = await moveStack(item, picked.partner, picked.qty);
+    ui.notifications.info(`Took ${moved} × ${item.name} from ${group.name} for ${picked.partner.name}.`);
+  } catch (err) {
+    console.error(`${MODULE_ID} | taking from the stash failed`, err);
+    ui.notifications.error(`Party Stash: taking ${item.name} failed (${err.message}).`);
+  }
+}
+
+/**
+ * The Stash button's click — takeDialog pointed the other way. The destinations are the
+ * GROUPS this character belongs to, which is almost always exactly one, so the picker
+ * almost never appears. The column itself is membership-gated (see setup), so an empty
+ * list here is a race, not a state to warn about.
+ */
+async function stashDialog(actor, item) {
+  const groups = game.actors.filter(g =>
+    g.type === "group" && g.system?.members?.some?.(m => m.actor === actor));
+  if (!groups.length) return;
+  if (!actor.isOwner) {
+    return void ui.notifications.warn(
+      `Party Stash: you don't own ${actor.name}, so you can't stash their things.`);
+  }
+  const owned = groups.filter(g => g.isOwner);
+  if (!owned.length) {
+    return void ui.notifications.warn(
+      `Party Stash: you don't own ${groups[0].name}, so you can't stash in it. Ask your GM.`);
+  }
+  const esc = Handlebars.escapeExpression;
+  const picked = await buttonPrompt({
+    title: owned.length === 1 ? `Stash in ${owned[0].name}` : "Stash",
+    verb: "Stash", icon: "fa-solid fa-box-open",
+    question: owned.length === 1
+      ? `Put <strong>${esc(item.name)}</strong> in ${inventoryLabel(owned[0].name)}?`
+      : `Put <strong>${esc(item.name)}</strong> in the party inventory?`,
+    item, partners: owned, partnerLabel: "In"
+  });
+  if (!picked) return;
+  try {
+    const moved = await moveStack(item, picked.partner, picked.qty);
+    ui.notifications.info(`Stashed ${moved} × ${item.name} in ${picked.partner.name}.`);
+  } catch (err) {
+    console.error(`${MODULE_ID} | stashing failed`, err);
+    ui.notifications.error(`Party Stash: stashing ${item.name} failed (${err.message}).`);
+  }
+}
+
+/**
+ * Wire a column's buttons after a sheet render. The buttons come fresh from the template
+ * on every render, so listeners attach once per node (`data-wired`); the click is stopped
+ * before the row's own click action (use/expand) sees it.
+ */
+function wireButtons(root, className, onClick, setting) {
+  try {
+    if (!game.settings.get(MODULE_ID, setting)) return;
+    for (const button of root?.querySelectorAll(`button.${className}:not([data-wired])`) ?? []) {
+      button.dataset.wired = "true";
+      button.addEventListener("click", ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const itemId = ev.currentTarget.closest("[data-item-id]")?.dataset?.itemId;
+        if (itemId) onClick(itemId);
+      });
+    }
+  } catch (err) {
+    console.error(`${MODULE_ID} | wiring ${className} failed`, err);
+  }
+}
+
+/** The Stash buttons on a member's character sheet (the column is injected in setup). */
+Hooks.on("renderCharacterActorSheet", (app, element) => {
+  const actor = app.document;
+  if (actor?.type !== "character") return;
+  const root = element instanceof HTMLElement ? element : app.element;
+  wireButtons(root, "partystash-stash-button", itemId => {
+    const item = actor.items.get(itemId);
+    if (item) stashDialog(actor, item);
+  }, "stash");
+});
 
 /**
  * Make sure the module's stylesheet is actually in the cascade.
@@ -920,11 +1452,17 @@ Hooks.once("ready", () => {
  * clever about caching.
  */
 Hooks.on("renderGroupActorSheet", (app, element) => {
+  const group = app.document;
+  if (group?.type !== "group") return;
+  const root = element instanceof HTMLElement ? element : app.element;
+
+  wireButtons(root, "partystash-take-button", itemId => {
+    const item = group.items.get(itemId);
+    if (item) takeDialog(group, item);
+  }, "take");
+
   try {
     if (!game.settings.get(MODULE_ID, "coin")) return;
-    const group = app.document;
-    if (group?.type !== "group") return;
-    const root = element instanceof HTMLElement ? element : app.element;
     const section = root?.querySelector("section.currency");
     if (!section || section.querySelector(".partystash-coin")) return;
 

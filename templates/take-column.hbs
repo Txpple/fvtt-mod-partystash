@@ -1,0 +1,12 @@
+{{!-- Loot Shelf's shelf-Buy control pointed the other way (see loot-take.hbs there).
+      `always-interactive` mirrors it and is required, not decorative: on a sheet the
+      viewer can't edit, the framework disables every control without the class. What the
+      button does is re-validated in the click handler (own the group and a member), so
+      the class grants an affordance, never a permission. --}}
+<div class="item-detail item-partystashTake" data-column-id="partystashTake">
+    <button type="button" class="partystash-take-button always-interactive"
+            aria-label="Take {{ item.name }}">
+        <i class="fa-solid fa-hand-holding" inert></i>
+        <span>Take</span>
+    </button>
+</div>

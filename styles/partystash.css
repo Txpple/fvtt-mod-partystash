@@ -131,6 +131,13 @@
   margin: 0 0 0.5rem;
 }
 
+/* The change-making notice — the one moment the dialog re-composes a purse, announced
+   before it happens rather than discovered in the receipt. */
+.partystash-dialog .partystash-convert {
+  margin: 0 0 0.5rem;
+  font-style: italic;
+}
+
 .partystash-dialog .partystash-all {
   width: 100%;
   margin: 0;
@@ -148,6 +155,41 @@
 
 .partystash-dialog .partystash-all-note::after {
   content: ")";
+}
+
+/* -------------------------------------------------- */
+/*  The Take & Stash columns                          */
+/* -------------------------------------------------- */
+
+/* REQUIRED, not cosmetic: column widths come from CSS keyed on `.item-<columnId>`, applied
+   to header and row cells together — a column id without a width rule collapses to zero
+   (Loot Shelf handoff, landmine #2). Take lives on the group sheet, Stash on member
+   character sheets; both sit past the system's controls column, at the far right edge. */
+.dnd5e2.actor.group .items-section .items-header .item-partystashTake,
+.dnd5e2.actor.group .items-section .item .item-partystashTake,
+.dnd5e2.actor.character .items-section .items-header .item-partystashStash,
+.dnd5e2.actor.character .items-section .item .item-partystashStash {
+  width: 84px;
+  justify-content: center;
+}
+
+/* Loot Shelf's Buy and Take are the same control wearing different words; so are these. */
+.dnd5e2.sheet.actor .partystash-take-button,
+.dnd5e2.sheet.actor .partystash-stash-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  padding: 0 10px;
+  line-height: 26px;
+  white-space: nowrap;
+}
+
+/* Nobody wields a sword out of the party's bag: the equip toggle means nothing on a group
+   inventory row, so the GROUP sheet drops it (owner's call, 2026-08-26). Scoped hard to
+   `.group` — character and NPC sheets keep theirs. */
+.dnd5e2.actor.group .items-section .item-controls [data-action="equip"] {
+  display: none;
 }
 
 /* Receipt Settings — the delivery choice on the module's settings sheet, rendered as a
