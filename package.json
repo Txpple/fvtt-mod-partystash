@@ -1,0 +1,14 @@
+{
+  "name": "fvtt-mod-partystash",
+  "private": true,
+  "type": "module",
+  "description": "Development tooling for Party Stash. NOTHING HERE SHIPS — the module is plain ES modules loaded straight from scripts/, with no build step; this file declares what tools/ imports.",
+  "devDependencies": {
+    "fvtt-mcp-dnd5e": "file:../fvtt-mcp-dnd5e"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "author": "Txpple",
+  "license": "MIT"
+}
