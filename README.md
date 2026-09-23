@@ -143,9 +143,13 @@ into a broadcast.
 ## Compatibility
 
 Requires the **dnd5e** system, 5.x or later (the module rides the drop-behavior seam the
-system introduced in 5.0). Foundry v13+ (verified on v14 with dnd5e 5.3.3). If the seam
-ever moves, the module logs an error and leaves drops at stock behavior — it fails open,
-never destructive.
+system introduced in 5.0). Foundry v13+ (verified on v14.368 with dnd5e 6.0.3, and earlier
+with dnd5e 5.3.3). If the seam ever moves, the module logs an error and leaves drops at stock
+behavior — it fails open, never destructive.
+
+dnd5e 6.0's own **Split Stack** context-menu entry appears on member sheets but not on the
+group sheet, and it splits a stack in place rather than moving it — so the Take and Stash
+buttons are still how part of a stack goes in or out of the stash.
 
 ## Installation
 

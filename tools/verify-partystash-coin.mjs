@@ -8,7 +8,7 @@
 //   A. injection      : both buttons on the group sheet's currency row (GM view)
 //   B. GM escape hatch: GM keeps editable purse fields AND the system's currency button
 //   C. deposit        : member -> stash, DENOMINATION-PRESERVING (2 pp arrives as 2 pp)
-//   D. caps           : each box is capped at what the source actually holds
+//   D. caps           : each box is capped at what the source's purse can AFFORD (v1.5)
 //   E. withdraw       : stash -> member, denomination-preserving
 //   F. receipt        : the whisper names the member and the direction
 //   G. player view    : purse fields read-only, system currency button GONE, buttons present
@@ -274,14 +274,20 @@ try {
     groupId: setup.groupId,
     partnerId: setup.partnerId,
     dir: 'deposit',
-    amounts: { pp: 2, gp: 99, sp: 0, cp: 0 }, // gp is deliberately over the cap of 5
+    // gp is deliberately over budget: once 2 pp is spoken for, the purse affords only 5 gp more
+    amounts: { pp: 2, gp: 99, sp: 0, cp: 0 },
   });
   if (dep.error) console.log('  probe error:', dep.error);
+  // Since v1.5 each box is capped by what the purse's total VALUE affords (2537 cp here), not by
+  // the loose coins held — asking for coin the member doesn't hold loose makes change.
   assert(
-    eq(dep.maxes, { pp: 2, gp: 5, ep: 0, sp: 3, cp: 7 }),
-    `boxes capped at the member's purse (got ${JSON.stringify(dep.maxes)})`
+    eq(dep.maxes, { pp: 2, gp: 25, ep: 50, sp: 253, cp: 2537 }),
+    `boxes capped at what the member's purse affords (got ${JSON.stringify(dep.maxes)})`
   );
-  assert(dep.disabled?.ep === true, 'a denomination the member has none of is disabled');
+  assert(
+    dep.disabled?.ep === false,
+    'electrum stays open though the member holds none — change can be made'
+  );
   assert(
     dep.valuesAfterClamp?.gp === 5,
     `over-cap entry clamped to 5 (got ${dep.valuesAfterClamp?.gp})`
@@ -339,8 +345,8 @@ try {
   });
   if (wd.error) console.log('  probe error:', wd.error);
   assert(
-    eq(wd.maxes, { pp: 2, gp: 45, ep: 0, sp: 0, cp: 0 }),
-    `withdraw boxes capped at the STASH purse (got ${JSON.stringify(wd.maxes)})`
+    eq(wd.maxes, { pp: 6, gp: 65, ep: 130, sp: 650, cp: 6500 }), // 2 pp 45 gp = 6500 cp
+    `withdraw boxes capped at what the STASH purse affords (got ${JSON.stringify(wd.maxes)})`
   );
   assert(
     eq(wd.groupAfter, { pp: 1, gp: 35, ep: 0, sp: 0, cp: 0 }),

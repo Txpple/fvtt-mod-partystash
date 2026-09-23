@@ -62,7 +62,11 @@
  * FogManager wraps). Verified against dnd5e 5.3.3 on Foundry v14: the group sheet
  * refuses non-physical items BEFORE the move-delete runs, and the source item is only
  * deleted after Item5e.createDocuments has resolved on the target, so a failed or
- * refused drop never destroys the original.
+ * refused drop never destroys the original. Verified live again on dnd5e 6.0.3 / Foundry
+ * 14.368 on 2026-09-23 (tools/verify-partystash*.mjs, every probe passing), and the 6.0.5
+ * source still has every seam this file wraps or queries unchanged — _defaultDropBehavior,
+ * both _onDropItem overrides, event._behavior, inventorySource, _configureInventorySections,
+ * and the currency-row and item-control markup.
  */
 
 const MODULE_ID = "fvtt-mod-partystash";
@@ -1080,9 +1084,12 @@ async function coinDialog(group, dir) {
 
 /**
  * dnd5e's drop pipeline moves the whole item document; quantity is not a concept anywhere
- * in it. The context menu offers no split either — its Duplicate mints a "{name} (Copy)"
- * clone, which is exactly what a player reaching for one Antitoxin out of four found on
- * 2026-08-25 (three times). Two affordances fix that, per the owner's call on 2026-08-26:
+ * in it. The group sheet's context menu offers no split either — its Duplicate mints a
+ * "{name} (Copy)" clone, which is exactly what a player reaching for one Antitoxin out of
+ * four found on 2026-08-25 (three times). dnd5e 6.0 added a Split Stack entry, but the
+ * inventory element returns before its owned-item options on a GROUP actor, so it only
+ * appears on member sheets — and it splits in place on one actor, never across the stash.
+ * Two affordances fix that, per the owner's call on 2026-08-26:
  *
  * SPLIT PROMPT — every owned member↔group MOVE drop asks first (no modifier key). A
  * stacked item asks "how many?", defaulting to the WHOLE stack, so the old gesture is
