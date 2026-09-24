@@ -62,11 +62,11 @@
  * FogManager wraps). Verified against dnd5e 5.3.3 on Foundry v14: the group sheet
  * refuses non-physical items BEFORE the move-delete runs, and the source item is only
  * deleted after Item5e.createDocuments has resolved on the target, so a failed or
- * refused drop never destroys the original. Verified live again on dnd5e 6.0.3 / Foundry
- * 14.368 on 2026-09-23 (tools/verify-partystash*.mjs, every probe passing), and the 6.0.5
- * source still has every seam this file wraps or queries unchanged — _defaultDropBehavior,
- * both _onDropItem overrides, event._behavior, inventorySource, _configureInventorySections,
- * and the currency-row and item-control markup.
+ * refused drop never destroys the original. Verified live again on dnd5e 6.0.3 and 6.0.5 /
+ * Foundry 14.368 on 2026-09-23 (tools/verify-partystash*.mjs, every probe passing): the
+ * 6.0.3 -> 6.0.5 diff leaves every seam this file wraps or queries unchanged —
+ * _defaultDropBehavior, both _onDropItem overrides, event._behavior, inventorySource,
+ * _configureInventorySections, and the currency-row and item-control markup.
  */
 
 const MODULE_ID = "fvtt-mod-partystash";
