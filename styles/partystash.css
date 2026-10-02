@@ -168,14 +168,26 @@
 .dnd5e2.actor.group .items-section .items-header .item-partystashTake,
 .dnd5e2.actor.group .items-section .item .item-partystashTake,
 .dnd5e2.actor.character .items-section .items-header .item-partystashStash,
-.dnd5e2.actor.character .items-section .item .item-partystashStash {
+.dnd5e2.actor.character .items-section .item .item-partystashStash,
+.dnd5e2.actor.character .items-section .items-header .item-partystashGive,
+.dnd5e2.actor.character .items-section .item .item-partystashGive {
   width: 84px;
   justify-content: center;
 }
 
+/* v1.7 — Stash and Give share ONE column when both are on (layout B, the owner's call on
+   2026-10-01): a pair of buttons side by side, 160px, rather than two 84px columns. */
+.dnd5e2.actor.character .items-section .items-header .item-partystashPair,
+.dnd5e2.actor.character .items-section .item .item-partystashPair {
+  width: 160px;
+  justify-content: center;
+  gap: 6px;
+}
+
 /* Loot Shelf's Buy and Take are the same control wearing different words; so are these. */
 .dnd5e2.sheet.actor .partystash-take-button,
-.dnd5e2.sheet.actor .partystash-stash-button {
+.dnd5e2.sheet.actor .partystash-stash-button,
+.dnd5e2.sheet.actor .partystash-give-button {
   display: inline-flex;
   align-items: center;
   gap: 4px;

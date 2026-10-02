@@ -1,10 +1,22 @@
-{{!-- The Take button pointed back at the stash (see take-column.hbs for why
-      `always-interactive` is required). The click handler validates ownership of both
-      the character and the group; the column only renders for group members at all. --}}
-<div class="item-detail item-partystashStash" data-column-id="partystashStash">
+{{!-- The Take button pointed back at the stash, and since v1.7 its neighbour Give (see
+      take-column.hbs for why `always-interactive` is required). dnd5e renders a column
+      partial with the COLUMN OBJECT as its context, so `id`, `stash` and `give` here are
+      what setup put on the column: one template serves the Stash-only, Give-only and paired
+      layouts, and the id picks the width rule in partystash.css. The click handlers validate
+      ownership; the column only renders for group members at all. --}}
+<div class="item-detail item-{{ id }}" data-column-id="{{ id }}">
+    {{#if stash}}
     <button type="button" class="partystash-stash-button always-interactive"
             aria-label="Stash {{ item.name }}">
         <i class="fa-solid fa-box-open" inert></i>
         <span>Stash</span>
     </button>
+    {{/if}}
+    {{#if give}}
+    <button type="button" class="partystash-give-button always-interactive"
+            aria-label="Give {{ item.name }}">
+        <i class="fa-solid fa-people-arrows" inert></i>
+        <span>Give</span>
+    </button>
+    {{/if}}
 </div>

@@ -84,9 +84,31 @@ Party Stash fixes that both ways:
 - **Member character sheets get the mirror-image Stash button** on every inventory row,
   moving the item into the group's inventory with the same quantity prompt. The column only
   appears on characters that actually belong to a group — a loner's sheet is untouched.
+- **Beside Stash, a Give button** hands an item straight to another party member. Press it
+  and pick who — the list offers the members whose player is **online** (if you belong to
+  more than one party, a party picker sits above it) — with the same quantity prompt. If
+  nobody else is online, it says so instead of opening an empty list.
 
-Both buttons sit past the system's own row controls, at the far right edge, and the group
-sheet drops the per-row equip toggle — nobody wields a sword out of the party's bag.
+The buttons sit past the system's own row controls, at the far right edge (Stash and Give
+share one column), and the group sheet drops the per-row equip toggle — nobody wields a
+sword out of the party's bag.
+
+## Giving
+
+A player owns their own character, not their partymates', so no player client can write an
+item onto another member's sheet — and Party Stash never relies on a GM being online. Give
+therefore takes the road the table already used by hand (Stash, then the other player Takes)
+and makes it one gesture: your client puts the item in the stash **marked for the recipient's
+player**, and that player's client moves it onto their character and clears the stash row.
+One receipt — *"Ann gave 2 × Antitoxin to Bob"* — not a stash-in and a take-out.
+
+If the other player's client never answers (they logged off between your press and the move,
+say), the item comes back to you after a few seconds with an error asking you to try again;
+nothing is left waiting in the stash. Whichever client clears the stash row owns the gift, so
+a slow recipient and the take-back can never both keep a copy. A member you own yourself (a
+GM, or a second character of yours) simply receives the item directly. NPC members have no
+player and are not offered. Dragging from one character sheet to another is unchanged — still
+a stock copy.
 
 Splits follow the same ordering as coin: the target is credited before the source is
 debited, so a failure duplicates items rather than destroying them — and the receipt names
@@ -125,7 +147,8 @@ hand edits and GM adjustments still read as adjustments, because that is what th
 | Receipts | broadcast to the server | Who reads a receipt — see below. |
 | Deposit / withdraw coin window | on | Turn off to restore the stock currency row for everyone. |
 | Take button on the group inventory | on | Turn off to remove the Take column. The drag split prompt rides the item-transfer toggle instead. |
-| Stash button on member character sheets | on | Turn off to remove the Stash column from character sheets. |
+| Stash button on member character sheets | on | Turn off to remove the Stash button from character sheets. |
+| Give button on member character sheets | on | Turn off to remove the Give button. With both on, Stash and Give share one column. |
 
 **Receipt Settings** is a choice of two, and Loot Shelf offers the same one, so a table can
 set one policy across both modules:

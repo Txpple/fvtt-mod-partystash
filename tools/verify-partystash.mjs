@@ -14,6 +14,8 @@
 //   F. member -> group, 1 of 3: SPLIT (v1.6 quantity prompt answered with 1)
 //   G. Take button            : 1 of the group's stack to the member (v1.6)
 //   H. Stash button           : a single item from the member to the group (v1.6)
+//   I. Give button            : a hand-off through the stash between two PLAYER clients, the
+//                               stall that takes the gift back, and "nobody online" (v1.7)
 //
 // B, C and F wait on the v1.6 prompt that every owned member↔group move asks first; the probe
 // answers it (whole stack unless it asks for a split). Before this harness knew about it, B and
@@ -158,9 +160,17 @@ const PROBE = async ({ sourceId, itemId, targetId, ctrl, tag, split }) => {
  * destination picker when there is one, and ask for `qty` when the stack prompts for it.
  * Single-arg evaluate (bridge rule).
  */
-const BUTTON_PROBE = async ({ actorId, itemId, button, partnerId, qty }) => {
-  const out = {};
+const BUTTON_PROBE = async ({ actorId, itemId, button, partnerId, qty, settle = 2000 }) => {
+  const out = { notifications: [] };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // Toasts live a few seconds; a result that lands late (a Give's take-back fires ~6s after
+  // the press) would be missed by one read, so the probe keeps sampling for `settle` ms.
+  const notes = new Set();
+  const sample = () => {
+    for (const n of document.querySelectorAll('#notifications .notification, .notification')) {
+      notes.add(n.textContent.trim().slice(0, 140));
+    }
+  };
   if (!itemId) return { error: 'no item id — an earlier probe failed' };
   try {
     const sheet = game.actors.get(actorId).sheet;
@@ -176,6 +186,7 @@ const BUTTON_PROBE = async ({ actorId, itemId, button, partnerId, qty }) => {
     let dlg = null;
     for (let i = 0; i < 20 && !dlg; i++) {
       await sleep(150);
+      sample();
       dlg = document.querySelector('.partystash-dialog');
     }
     out.prompt = dlg?.querySelector('.window-title')?.textContent?.trim() ?? null;
@@ -185,8 +196,13 @@ const BUTTON_PROBE = async ({ actorId, itemId, button, partnerId, qty }) => {
       const input = dlg.querySelector('input[name="qty"]');
       if (input && qty) input.value = String(qty);
       dlg.querySelector('button[data-action="go"]')?.click();
-      await sleep(2000);
     }
+    const until = Date.now() + settle;
+    while (Date.now() < until) {
+      await sleep(250);
+      sample();
+    }
+    out.notifications = [...notes];
     await sheet.close();
     return out;
   } catch (err) {
@@ -501,6 +517,208 @@ try {
   );
   assert(eAfter.onMember === true, 'GM view agrees: member kept the item');
   assert(eAfter.ownershipResidue === false, 'temp player ownership fully revoked');
+
+  // --- I. Give button: a hand-off through the stash, two PLAYER clients (v1.7) ---------------
+  // A giver user owns member A, a taker user owns member B, neither owns the other — the real
+  // table shape, where no client can write onto the recipient directly. The giver presses Give
+  // on A's row: the item goes through the group marked for the taker's user, whose client
+  // moves it onto B and deletes the stash row; one "gave" receipt. Then the stall: the taker's
+  // client is made unable to credit (its actor's createEmbeddedDocuments throws), so the
+  // giver's timeout takes the gift back with the error. Last, with the taker gone, Give has
+  // nobody to offer and says so instead of opening a prompt.
+  console.log('# probe I — Give button, hand-off through the stash (two player clients)');
+  const GIVER = 'ZZ-PSTASH Giver';
+  const TAKER = 'ZZ-PSTASH Player';
+  const TAGGED = ({ aId, bId, groupId, tag }) => {
+    const rows = id =>
+      game.actors
+        .get(id)
+        .items.filter(i => i.name === tag)
+        .map(i => ({
+          id: i.id,
+          qty: i.system.quantity,
+          marked: !!i.getFlag('fvtt-mod-partystash', 'giveTo'),
+        }));
+    const receipts = game.messages.filter(m => /gave/.test(m.content) && m.content.includes(tag));
+    return {
+      a: rows(aId),
+      b: rows(bId),
+      group: rows(groupId),
+      receipts: receipts.length,
+      lastReceipt: receipts.at(-1)?.content ?? null,
+    };
+  };
+  const iArgs = { aId: setup.aId, bId: setup.bId, groupId: setup.groupId, tag: TAG };
+  const iSetup = await f.evaluate(
+    async ({ aId, bId, groupId, tag, giver, taker }) => {
+      const mk = async name =>
+        game.users.find(u => u.name === name) ??
+        (await User.implementation.create({ name, role: CONST.USER_ROLES.PLAYER }));
+      const g = await mk(giver);
+      const t = await mk(taker);
+      const OWNER = CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER;
+      await game.actors.get(aId).update({ [`ownership.${g.id}`]: OWNER });
+      await game.actors.get(bId).update({ [`ownership.${t.id}`]: OWNER });
+      const group = game.actors.get(groupId);
+      const grant = {};
+      for (const u of [g, t]) {
+        if (!group.testUserPermission(u, 'OWNER')) grant[`ownership.${u.id}`] = OWNER;
+      }
+      if (Object.keys(grant).length) await group.update(grant);
+      for (const id of [aId, bId, groupId]) {
+        const a = game.actors.get(id);
+        const stale = a.items.filter(i => i.name === tag).map(i => i.id);
+        if (stale.length) await a.deleteEmbeddedDocuments('Item', stale);
+      }
+      const [item] = await game.actors.get(aId).createEmbeddedDocuments('Item', [
+        { name: tag, type: 'loot', system: { quantity: 3 } },
+      ]);
+      return {
+        giverId: g.id,
+        takerId: t.id,
+        itemId: item.id,
+        groupGranted: Object.keys(grant).map(k => k.split('.')[1]),
+      };
+    },
+    { ...iArgs, giver: GIVER, taker: TAKER }
+  );
+  const iBefore = await f.evaluate(TAGGED, iArgs);
+
+  const fg = new Foundry({ ...foundryConfig(env), user: GIVER, password: '' });
+  const ft = new Foundry({ ...foundryConfig(env), user: TAKER, password: '' });
+  let I1 = { error: 'giver bridge never connected' };
+  let I2 = {};
+  let I3 = {};
+  let iAfter1 = {};
+  let iAfter2 = {};
+  try {
+    await fg.connect();
+    await ft.connect();
+    // A fresh bridge page spends ~15s warming compendium indexes and drains no socket traffic
+    // until it is done; after that it still applies a broadcast 1.5–4s late (measured
+    // 2026-10-01). A live browser does this in milliseconds, so the waits below are the
+    // harness's, not the module's.
+    await sleep(16000);
+    const who = await fg.evaluate(
+      ({ aId, bId, takerId }) => ({
+        ownsA: game.actors.get(aId)?.isOwner ?? null,
+        ownsB: game.actors.get(bId)?.isOwner ?? null,
+        takerActive: game.users.get(takerId)?.active ?? null,
+      }),
+      { aId: setup.aId, bId: setup.bId, takerId: iSetup.takerId }
+    );
+    console.log(
+      `  [giver] owns A=${who.ownsA}, owns B=${who.ownsB}, taker online=${who.takerActive}`
+    );
+
+    // I1: give 2 of 3 — the taker's client finishes the move (its latency is the harness's)
+    I1 = await fg.evaluate(BUTTON_PROBE, {
+      actorId: setup.aId,
+      itemId: iSetup.itemId,
+      button: 'partystash-give-button',
+      partnerId: setup.bId,
+      qty: 2,
+      settle: 6000,
+    });
+    await sleep(1000);
+    iAfter1 = await f.evaluate(TAGGED, iArgs);
+
+    // I2: the taker's client can't credit — the giver takes the gift back (GIVE_WAIT = 8s)
+    await ft.evaluate(({ bId }) => {
+      const b = game.actors.get(bId);
+      b.createEmbeddedDocuments = async () => {
+        throw new Error('probe: recipient client not answering');
+      };
+      return true;
+    }, { bId: setup.bId });
+    I2 = await fg.evaluate(BUTTON_PROBE, {
+      actorId: setup.aId,
+      itemId: iSetup.itemId,
+      button: 'partystash-give-button',
+      partnerId: setup.bId,
+      settle: 11000,
+    });
+    await sleep(1000);
+    iAfter2 = await f.evaluate(TAGGED, iArgs);
+
+    // I3: nobody online — no prompt, a warning
+    await ft.dispose();
+    await sleep(3000);
+    I3 = await fg.evaluate(BUTTON_PROBE, {
+      actorId: setup.aId,
+      itemId: iAfter2.a?.[0]?.id,
+      button: 'partystash-give-button',
+    });
+  } finally {
+    await fg.dispose().catch(() => {});
+    await ft.dispose().catch(() => {});
+  }
+  if (I1.error) console.log('  probe error:', I1.error);
+  assert(I1.buttonPresent === true, 'Give button rendered on the member row (player client)');
+  assert(I1.prompt === `Give ${TAG}`, `give prompt asked (got "${I1.prompt}")`);
+  assert(
+    iAfter1.a?.length === 1 && iAfter1.a[0].qty === 1,
+    `giver's stack went 3 -> 1 (got ${JSON.stringify(iAfter1.a)})`
+  );
+  assert(
+    iAfter1.b?.length === 1 && iAfter1.b[0].qty === 2 && !iAfter1.b[0].marked,
+    `2 arrived on ${setup.bName}, unmarked (got ${JSON.stringify(iAfter1.b)})`
+  );
+  assert(iAfter1.group?.length === 0, 'nothing left in the stash — the hand-off cleared its row');
+  assert(
+    iAfter1.receipts === iBefore.receipts + 1 && /gave 2 ×/.test(iAfter1.lastReceipt ?? ''),
+    `exactly one "gave" receipt (${iBefore.receipts} -> ${iAfter1.receipts}): ${iAfter1.lastReceipt}`
+  );
+  assert(
+    (I1.notifications ?? []).some(n => /Gave 2 ×/.test(n)),
+    `giver told "Gave 2 × …" (${(I1.notifications ?? []).join(' | ')})`
+  );
+
+  if (I2.error) console.log('  probe error:', I2.error);
+  assert(
+    iAfter2.a?.length === 1 && iAfter2.a[0].qty === 1 && !iAfter2.a[0].marked,
+    `the stalled gift came back to ${setup.aName} (got ${JSON.stringify(iAfter2.a)})`
+  );
+  assert(iAfter2.group?.length === 0, 'nothing left in the stash after the take-back');
+  assert(
+    iAfter2.b?.length === 1 && iAfter2.b[0].qty === 2,
+    `${setup.bName} unchanged by the stall (got ${JSON.stringify(iAfter2.b)})`
+  );
+  assert(iAfter2.receipts === iAfter1.receipts, 'no receipt for a gift that came back');
+  assert(
+    (I2.notifications ?? []).some(n => /problem finding/.test(n)),
+    `giver got the "problem finding …" error (${(I2.notifications ?? []).join(' | ')})`
+  );
+
+  if (I3.error) console.log('  probe error:', I3.error);
+  assert(I3.prompt === null, `no prompt with nobody online (got "${I3.prompt}")`);
+  assert(
+    (I3.notifications ?? []).some(n => /no party members to give to/.test(n)),
+    `giver told nobody is online (${(I3.notifications ?? []).join(' | ')})`
+  );
+
+  // temp users and grants out again
+  const iClean = await f.evaluate(
+    async ({ aId, bId, groupId, giverId, takerId, groupGranted }) => {
+      const strip = async (actor, ids) => {
+        const next = {};
+        for (const [uid, level] of Object.entries(actor.ownership ?? {})) {
+          if (!ids.includes(uid)) next[uid] = level;
+        }
+        await actor.update({ ownership: next }, { diff: false, recursive: false });
+      };
+      await strip(game.actors.get(aId), [giverId]);
+      await strip(game.actors.get(bId), [takerId]);
+      if (groupGranted.length) await strip(game.actors.get(groupId), groupGranted);
+      for (const id of [giverId, takerId]) await game.users.get(id)?.delete();
+      const residue = [aId, bId, groupId].some(id =>
+        [giverId, takerId].some(u => u in (game.actors.get(id)?.ownership ?? {}))
+      );
+      return { residue, usersLeft: [giverId, takerId].filter(id => game.users.has(id)).length };
+    },
+    { ...iArgs, giverId: iSetup.giverId, takerId: iSetup.takerId, groupGranted: iSetup.groupGranted }
+  );
+  assert(iClean.residue === false && iClean.usersLeft === 0, 'temp giver/taker users and grants removed');
 
   // --- cleanup --------------------------------------------------------------------------------
   await f.evaluate(

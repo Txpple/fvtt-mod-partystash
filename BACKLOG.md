@@ -7,6 +7,8 @@ release commit.
 
 ## 1 · A Give button on member character sheets
 
+**BUILT 2026-10-01** on main (the give section of `scripts/partystash.js`, `tools/verify-partystash.mjs` probe I). Verified live in the sandbox: see the issue. Leaves this file with the v1.7.0 release.
+
 **Asked 2026-09-30 (the user):** a Give button next to the Stash button. Its dialog
 transfers the item to another existing party member. Filed as
 [#1](https://github.com/Txpple/fvtt-mod-partystash/issues/1) on 2026-10-01, with a clickable
@@ -29,7 +31,12 @@ into one gesture, and the recipient's client does the second half by itself.
 1. **The list.** Give on an inventory row opens `buttonPrompt`, with the picker labelled
    "To". It lists the characters in the giver's groups whose player is **online** and also
    owns the group, since their client will take the item out of it. Each entry shows the
-   character and the player: "Bob (Sam)". A stack also gets the quantity prompt.
+   character and the player: "Bob (Sam)". A stack also gets the quantity prompt. When the
+   giver belongs to **more than one group**, a group picker sits above the "To" picker and
+   the recipient list follows it; with one group the picker is not shown and that group is
+   used (the user, 2026-10-01). When the list is empty, a warning toast says so instead of
+   an empty picker: "no party members to give to — nobody else in The Party is online right
+   now."
 2. **The giver's half.** The giver's client puts the chosen quantity in the group as **its
    own row, never merged** into an existing stack. It marks the row with a flag,
    `flags.fvtt-mod-partystash.giveTo = { actor, user, from }`. Then it reduces or deletes
@@ -73,15 +80,20 @@ If the giver's client closes before its timeout fires and the recipient never ac
 is left orphaned in the stash. The giver's client then reverts rows marked `from` its player
 on its next login. It's the one leftover case, and a corner of a corner.
 
-**Still open:**
+**Ruled 2026-10-01 (the user), off the prototype:**
 
-- **NPC recipients.** A hireling or a mount has no player, so the hand-off can't reach it.
-  Should NPCs appear only for a giver who owns them, or not at all?
-- **Width.** Stash is an 84px column on the busiest sheet in the game, and a second column
-  would double that. Options: one column holding both buttons, or Give in the row's context
-  menu instead.
-- **Which group.** When the giver and recipient share more than one group, the hand-off needs
-  a rule. Proposed: use a group both players own, and the first one if several qualify.
+- **Layout B.** One column on the character sheet holds Stash and Give side by side
+  (~160px, in place of the 84px Stash column). The column header reads "Party Stash".
+- **NPC members are left out.** A hireling or a mount has no player, so the hand-off can't
+  reach it. A later version may list them while a GM is online.
+- **Nobody online** is a warning toast, the module's voice for every other refusal.
+- **Nothing shows while waiting.** The normal case is under a second; the stall has its
+  own error.
+- **The icon** is `fa-people-arrows`.
+- **The receipt** reads "Ann gave 2 × Antitoxin to Bob".
+
+**Still to build around:**
+
 - **Containers.** A container moves with its contents, and the contents carry the container's
   id, not the mark. The receipt hooks must skip items inside a marked container too, or giving
   a backpack posts a line for everything in it.

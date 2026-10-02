@@ -57,6 +57,13 @@
  * way — and member character sheets grow the mirror-image STASH button, gated on actually
  * belonging to a group. See the stacks section below.
  *
+ * v1.7 adds GIVE beside Stash: hand an item straight to another party member. A player can't
+ * write onto a partymate's sheet, and this module never leans on a GM being online, so the
+ * gift takes the road the table already used by hand — into the stash marked for the
+ * recipient's player, whose client moves it on and deletes the stash row. One receipt, no GM;
+ * a hand-off nobody finishes comes back to the giver. PC↔PC DRAGS are unchanged (still a
+ * stock copy): Give is a button gesture only. See the give section below.
+ *
  * Implemented as a wrap of BaseActorSheet#_defaultDropBehavior — the single seam where
  * dnd5e decides a drag's default behavior (same wrap style as fvtt-mod-autoexplore's
  * FogManager wraps). Verified against dnd5e 5.3.3 on Foundry v14: the group sheet
@@ -66,7 +73,8 @@
  * Foundry 14.368 on 2026-09-23 (tools/verify-partystash*.mjs, every probe passing): the
  * 6.0.3 -> 6.0.5 diff leaves every seam this file wraps or queries unchanged —
  * _defaultDropBehavior, both _onDropItem overrides, event._behavior, inventorySource,
- * _configureInventorySections, and the currency-row and item-control markup.
+ * _configureInventorySections, and the currency-row and item-control markup. v1.7's Give
+ * verified the same way on 2026-10-01 (probe I: two player clients, the stall, nobody online).
  */
 
 const MODULE_ID = "fvtt-mod-partystash";
@@ -152,6 +160,19 @@ Hooks.once("init", () => {
       + "gets a Stash button when that character belongs to a group, moving the item into "
       + "the group's inventory with the same quantity prompt. Characters in no group keep "
       + "the stock row. Turn this off to remove the column.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
+
+  game.settings.register(MODULE_ID, "give", {
+    name: "Give button on member character sheets",
+    hint: "Beside Stash: every inventory row on a character sheet gets a Give button when "
+      + "that character belongs to a group. Press it to hand the item to another member "
+      + "whose player is online. The item passes through the group's inventory and the other "
+      + "player's client finishes the move, so no GM is needed; if their client never answers, "
+      + "the item comes back. Turn this off to remove the button.",
     scope: "world",
     config: true,
     type: Boolean,
@@ -289,11 +310,33 @@ Hooks.once("setup", () => {
   };
   injectColumn(Group, "take", "partystashTake",
     `modules/${MODULE_ID}/templates/take-column.hbs`);
-  // The character sheet only grows a Stash button when the character is actually a member
-  // of some group — a loner's inventory keeps its stock row.
-  injectColumn(globalThis.dnd5e?.applications?.actor?.CharacterActorSheet, "stash", "partystashStash",
-    `modules/${MODULE_ID}/templates/stash-column.hbs`,
-    sheet => isGroupMember(sheet.actor));
+
+  // The character sheet's column: Stash, Give (v1.7), or both in ONE cell — layout B, the
+  // owner's call on 2026-10-01, so the busiest sheet in the game pays 160px for the pair
+  // rather than 168px for two columns. dnd5e renders the column partial with the column
+  // object as its context, so the booleans set here are what stash-column.hbs reads; the id
+  // picks the width rule in partystash.css. Membership-gated like before: a loner's inventory
+  // keeps its stock row.
+  const Character = globalThis.dnd5e?.applications?.actor?.CharacterActorSheet;
+  if (Character) {
+    const origSections = Character.prototype._configureInventorySections;
+    Character.prototype._configureInventorySections = async function (sections) {
+      await origSections?.call(this, sections);
+      try {
+        const stash = game.settings.get(MODULE_ID, "stash");
+        const give = game.settings.get(MODULE_ID, "give");
+        if (!(stash || give) || !isGroupMember(this.actor)) return;
+        const id = stash && give ? "partystashPair" : stash ? "partystashStash" : "partystashGive";
+        const column = {
+          id, width: stash && give ? 160 : 84, order: 1100, priority: 100, label: "",
+          template: `modules/${MODULE_ID}/templates/stash-column.hbs`, stash, give
+        };
+        for (const s of sections) if (Array.isArray(s.columns)) s.columns = [...s.columns, column];
+      } catch (err) {
+        console.error(`${MODULE_ID} | adding the character-sheet column failed`, err);
+      }
+    };
+  }
 
   // Column templates render as preloaded Handlebars partials — without this the cell
   // comes up empty, not errored.
@@ -532,6 +575,7 @@ Hooks.on("createItem", (item, options, userId) => {
   try {
     if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
     if (!item.system?.schema?.fields?.quantity) return; // physical items only
+    if (isHandOff(item)) return; // a gift passing through — its own receipt, see the give section
     recordReceipt(item, "gain", Math.max(1, Math.floor(item.system.quantity ?? 1)), false, userId);
   } catch (err) {
     console.error(`${MODULE_ID} | receipt create-hook failed`, err);
@@ -542,6 +586,10 @@ Hooks.on("deleteItem", (item, options, userId) => {
   try {
     if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
     if (!item.system?.schema?.fields?.quantity) return;
+    if (isHandOff(item)) {
+      quiet.delete(item.id);
+      return;
+    }
     recordReceipt(item, "loss", Math.max(1, Math.floor(item.system.quantity ?? 1)), false, userId);
   } catch (err) {
     console.error(`${MODULE_ID} | receipt delete-hook failed`, err);
@@ -667,7 +715,7 @@ Hooks.on("renderSettingsConfig", (app, element) => {
     divider("enabled", "Item Transfers");
     divider("receipts", "Receipt Settings");
     divider("coin", "Coin Window");
-    divider("take", "Take & Stash Buttons");
+    divider("take", "Take, Stash & Give Buttons");
 
     const radios = document.createElement("div");
     radios.className = "partystash-receipt-modes";
@@ -1154,6 +1202,19 @@ async function moveStack(item, target, n) {
     return max;
   }
 
+  await creditStack(item, target, n);
+
+  if (n >= max) await item.delete();
+  else await item.update({ "system.quantity": max - n });
+  return n;
+}
+
+/**
+ * The data a non-container item carries to another actor: a fresh copy of `n`, loose,
+ * unequipped and unattuned, and without the hand-off mark (a gift arriving on its recipient
+ * is just an item again).
+ */
+function carriedData(item, n) {
   const data = item.toObject();
   delete data._id;
   delete data.folder;
@@ -1163,6 +1224,17 @@ async function moveStack(item, target, n) {
   if ("equipped" in sys) sys.equipped = false;
   if ("container" in sys) sys.container = null;
   sys.quantity = n;
+  if (data.flags?.[MODULE_ID]) delete data.flags[MODULE_ID];
+  return data;
+}
+
+/**
+ * The credit half of a non-container move: `n` of `item` land on `target`. Returns an
+ * `undo` that takes exactly that credit back again — what the hand-off's guard calls when
+ * this client turns out not to be the one that got the stash row (see claimRow).
+ */
+async function creditStack(item, target, n) {
+  const data = carriedData(item, n);
 
   // Merge into an existing stack the way dnd5e's own _onDropStackConsumables does
   // (consumables with a compendium source, same name, loose in the inventory), so a taken
@@ -1178,12 +1250,12 @@ async function moveStack(item, target, n) {
   } catch {
     similar = null;
   }
-  if (similar) await similar.update({ "system.quantity": stackCount(similar) + n });
-  else await target.createEmbeddedDocuments("Item", [data]);
-
-  if (n >= max) await item.delete();
-  else await item.update({ "system.quantity": max - n });
-  return n;
+  if (similar) {
+    await similar.update({ "system.quantity": stackCount(similar) + n });
+    return async () => similar.update({ "system.quantity": Math.max(0, stackCount(similar) - n) });
+  }
+  const [created] = await target.createEmbeddedDocuments("Item", [data]);
+  return async () => created?.delete();
 }
 
 /**
@@ -1398,7 +1470,7 @@ function wireButtons(root, className, onClick, setting) {
   }
 }
 
-/** The Stash buttons on a member's character sheet (the column is injected in setup). */
+/** The Stash and Give buttons on a member's character sheet (the column is injected in setup). */
 Hooks.on("renderCharacterActorSheet", (app, element) => {
   const actor = app.document;
   if (actor?.type !== "character") return;
@@ -1407,6 +1479,383 @@ Hooks.on("renderCharacterActorSheet", (app, element) => {
     const item = actor.items.get(itemId);
     if (item) stashDialog(actor, item);
   }, "stash");
+  wireButtons(root, "partystash-give-button", itemId => {
+    const item = actor.items.get(itemId);
+    if (item) giveDialog(actor, item);
+  }, "give");
+});
+
+/* -------------------------------------------------- */
+/*  Give — a hand-off through the stash               */
+/* -------------------------------------------------- */
+
+/**
+ * v1.7 — GIVE: hand an item straight to another party member, from the character sheet,
+ * with no GM in the loop. Filed as issue #1; ruled 2026-09-30 and 2026-10-01 off
+ * prototypes/give-button.html.
+ *
+ * A player owns their own character, not their partymates', and the server refuses a create
+ * on an actor you don't own — so Ann's client cannot simply write the item onto Bob. Every
+ * other write in this module runs on the acting client, and that is deliberate (see
+ * shouldPostReceipt: electing the GM lost receipts whenever the GM was absent). So Give is
+ * the table's own workaround made into one gesture. Players already give without a GM by
+ * pressing Stash and having the other player press Take, each half writing only to actors
+ * its presser owns. Give does the first half and the recipient's client does the second:
+ *
+ *   1. Ann's client puts the amount in the group as ITS OWN ROW, never merged, marked
+ *      `flags.fvtt-mod-partystash.giveTo = { actor, user, from, fromUser, at }`, then
+ *      reduces or deletes Ann's stack. Credit before debit, as everywhere here.
+ *   2. The mark names a USER, so exactly one client acts on it: Sam's. It sees the row
+ *      arrive (createItem fires on every client), moves it onto Bob through claimRow and
+ *      deletes the stash row. A GM who also owns Bob never touches it.
+ *   3. One receipt — "Ann gave 2 × Antitoxin to Bob" — posted by the client that finished the
+ *      move. The stash's own in/out receipts skip marked rows (isHandOff), so a gift reads as
+ *      a gift and not as a stash-in and a take-out.
+ *
+ * The recipient list only offers members whose player is online and owns the group, so a
+ * stall is rare; when it happens anyway (Sam logged off between the press and the move, or
+ * runs an older script), Ann's client waits GIVE_WAIT for the stash row to go, then takes it
+ * back and says so (the user's rule, 2026-09-30: nothing waits in the stash). A recipient Ann
+ * owns anyway — a GM, or a player with two characters in the party — gets the item directly.
+ *
+ * THE GUARD — deleting the stash row decides who gets the item. A slow Sam can finish just as
+ * Ann's timeout reverts; Sam logged in twice has two clients acting on one row. Everyone who
+ * moves a marked row credits first, then deletes the row; only one delete can succeed; a
+ * client whose delete fails, or finds the row gone, has LOST and undoes its own credit. At
+ * every moment at least one copy exists, and it ends with exactly one. Containers additionally
+ * keep their ids on the way through (createWithContents), so a second credit of the same
+ * container is refused by the server outright.
+ */
+
+/**
+ * How long the giver waits for the recipient's client before taking the gift back. A live
+ * browser applies a broadcast in milliseconds, but a laggy one (a tablet mid-render, the
+ * harness's headless pages at 1.5–4s) must not lose the race it would otherwise have won
+ * through the guard — so a few seconds more than it should ever need.
+ */
+const GIVE_WAIT = 8000;
+
+/** Item ids this client created or deleted as part of a hand-off — not stash traffic. */
+const quiet = new Set();
+
+/**
+ * Is this item a gift in transit — a marked stash row, something inside one, or an id this
+ * client moved as part of a hand-off? The receipt hooks skip these.
+ */
+function isHandOff(item) {
+  if (quiet.has(item.id)) return true;
+  if (item.getFlag?.(MODULE_ID, "giveTo")) return true;
+  const holder = item.system?.container ? item.parent?.items?.get(item.system.container) : null;
+  return !!holder?.getFlag?.(MODULE_ID, "giveTo");
+}
+
+/** A container's cargo, all the way down, as ids. */
+function cargoIds(item) {
+  const out = [];
+  for (const inner of item.system?.contents ?? []) {
+    out.push(inner.id, ...cargoIds(inner));
+  }
+  return out;
+}
+
+/**
+ * The online user whose client will finish a hand-off to `actor`: the one it is the assigned
+ * character of, else any active player who owns both the member and the group. GMs don't
+ * count unless the character is theirs — listing Bob while only the GM is online would make
+ * the GM's client the finisher, the dependency this design exists to avoid.
+ */
+function finisherFor(actor, group) {
+  const users = game.users.filter(u => u.active && u.id !== game.user.id
+    && actor.testUserPermission(u, "OWNER") && group.testUserPermission(u, "OWNER"));
+  return users.find(u => u.character === actor) ?? users.find(u => !u.isGM) ?? null;
+}
+
+/**
+ * Who `actor` can give to, per group: every group the giver owns and belongs to, with the
+ * character members that are either owned by the giver (a direct move) or have an online
+ * finisher. NPC members (a hireling, a mount) have no player and are left out — the user's
+ * call on 2026-10-01. Groups with nobody to give to are dropped.
+ */
+function giveOptions(actor) {
+  const out = [];
+  for (const group of game.actors) {
+    if (group.type !== "group" || !group.isOwner) continue;
+    if (!group.system?.members?.some?.(m => m.actor === actor)) continue;
+    const to = [];
+    for (const m of group.system.members) {
+      const other = m.actor;
+      if (!(other instanceof Actor) || other === actor || other.type !== "character") continue;
+      if (other.isOwner) to.push({ actor: other, user: null });
+      else {
+        const user = finisherFor(other, group);
+        if (user) to.push({ actor: other, user });
+      }
+    }
+    if (to.length) out.push({ group, to });
+  }
+  return out;
+}
+
+/**
+ * The Give button's click. The prompt is buttonPrompt's shape with one more field: when the
+ * giver belongs to more than one group a "Party" picker sits ABOVE the "To" picker and the
+ * recipients follow it; with one group the picker is not shown (the user, 2026-10-01). When
+ * there is nobody to give to, a warning says so instead of an empty picker.
+ */
+async function giveDialog(actor, item) {
+  if (!actor.isOwner) {
+    return void ui.notifications.warn(
+      `Party Stash: you don't own ${actor.name}, so you can't give their things away.`);
+  }
+  const options = giveOptions(actor);
+  if (!options.length) {
+    const groups = game.actors.filter(g =>
+      g.type === "group" && g.system?.members?.some?.(m => m.actor === actor));
+    const where = groups.length === 1 ? groups[0].name : "the party";
+    return void ui.notifications.warn(
+      `Party Stash: no party members to give to — nobody else in ${where} is online right now.`);
+  }
+
+  const esc = Handlebars.escapeExpression;
+  const max = stackCount(item);
+  const container = item.type === "container";
+  const askQty = !container && max > 1;
+  const detail = askQty ? ` There are ${max}.` : container ? " It moves with its contents." : "";
+  const label = c => c.user ? `${c.actor.name} (${c.user.name})` : c.actor.name;
+  const only = options.length === 1 && options[0].to.length === 1 ? options[0].to[0] : null;
+  const question = only
+    ? `Give <strong>${esc(item.name)}</strong> to <strong>${esc(only.actor.name)}</strong>?${detail}`
+    : `Give <strong>${esc(item.name)}</strong> to a party member?${detail}`;
+
+  const groupField = options.length > 1
+    ? `<div class="form-group"><label>Party</label><div class="form-fields"><select name="group">`
+      + options.map(o => `<option value="${o.group.id}">${esc(o.group.name)}</option>`).join("")
+      + `</select></div></div>`
+    : `<input type="hidden" name="group" value="${options[0].group.id}">`;
+  const toOptions = o => o.to.map(c => `<option value="${c.actor.id}">${esc(label(c))}</option>`).join("");
+  const partnerField = only
+    ? `<input type="hidden" name="partner" value="${only.actor.id}">`
+    : `<div class="form-group"><label>To</label><div class="form-fields"><select name="partner">`
+      + toOptions(options[0]) + `</select></div></div>`;
+  const qtyField = askQty
+    ? `<div class="form-group"><label>Quantity</label><div class="form-fields">`
+      + `<input type="number" name="qty" value="1" min="1" max="${max}" step="1" autofocus>`
+      + `</div><p class="hint">Up to ${max}.</p></div>`
+    : "";
+
+  const result = await foundry.applications.api.DialogV2.wait({
+    classes: ["partystash-dialog"],
+    window: { title: `Give ${item.name}`, icon: "fa-solid fa-people-arrows" },
+    position: { width: 360 },
+    content: `<p>${question}</p>` + groupField + partnerField + qtyField,
+    buttons: [
+      {
+        action: "go", label: "Give", icon: "fa-solid fa-people-arrows", default: true,
+        callback: (ev, button) => ({
+          groupId: button.form?.elements?.group?.value,
+          partnerId: button.form?.elements?.partner?.value,
+          qty: Math.max(1, Math.min(max, Math.floor(button.form?.elements?.qty?.valueAsNumber || 1)))
+        })
+      },
+      { action: "cancel", label: "Cancel" }
+    ],
+    rejectClose: false,
+    // The recipients follow the party picker (see coinDialog for the render-callback shape).
+    render: (event, dialog) => {
+      try {
+        const form = (dialog?.element ?? dialog).querySelector("form");
+        const groupSelect = form?.elements?.group;
+        const partnerSelect = form?.elements?.partner;
+        if (!groupSelect || groupSelect.type !== "select-one" || !partnerSelect) return;
+        groupSelect.addEventListener("change", () => {
+          const o = options.find(x => x.group.id === groupSelect.value) ?? options[0];
+          partnerSelect.innerHTML = toOptions(o);
+        });
+      } catch (err) {
+        console.error(`${MODULE_ID} | wiring the give dialog failed`, err);
+      }
+    }
+  });
+  if (!result || typeof result !== "object") return;
+  const option = options.find(o => o.group.id === result.groupId) ?? options[0];
+  const choice = option.to.find(c => c.actor.id === result.partnerId) ?? option.to[0];
+  const qty = container ? max : (askQty ? result.qty : 1);
+
+  try {
+    if (!choice.user) {
+      // The giver owns the recipient: a plain move, no hand-off.
+      const moved = await moveStack(item, choice.actor, qty);
+      ui.notifications.info(`Gave ${moved} × ${item.name} to ${choice.actor.name}.`);
+      postGiveReceipt(actor, choice.actor, item.name, moved, container);
+      return;
+    }
+    await handOff(actor, item, option.group, choice, qty);
+  } catch (err) {
+    console.error(`${MODULE_ID} | giving failed`, err);
+    ui.notifications.error(`Party Stash: giving ${item.name} failed (${err.message}).`);
+  }
+}
+
+/** The one receipt a gift posts, by whichever client finished the move. */
+function postGiveReceipt(from, to, name, amount, cargo) {
+  if (!receiptsEnabled()) return;
+  const label = `${amount} × <em>${name}</em>${cargo ? " (and its contents)" : ""}`;
+  postReceipt([`<strong>${from?.name ?? "Someone"}</strong> gave ${label} to <strong>${to.name}</strong>.`],
+    game.user.id, [from, to].filter(a => a instanceof Actor));
+}
+
+/**
+ * The giver's half: the marked row goes into the group, the giver's stack comes down, and
+ * then this client waits for the recipient's client to take the row away. If it is still
+ * there after GIVE_WAIT, this client takes the gift back through the same guard — so a
+ * recipient who finishes at the last moment still wins, and nothing is doubled.
+ */
+async function handOff(actor, item, group, { actor: to, user }, n) {
+  const max = stackCount(item);
+  n = Math.min(max, Math.max(1, Math.floor(Number(n) || 1)));
+  const container = item.type === "container";
+  const mark = { actor: to.id, user: user.id, from: actor.id, fromUser: game.user.id, at: Date.now() };
+  const name = item.name;
+
+  let row;
+  if (container) {
+    const Item5e = item.constructor;
+    const toCreate = await Item5e.createWithContents([item]);
+    foundry.utils.setProperty(toCreate[0], `flags.${MODULE_ID}.giveTo`, mark);
+    for (const d of toCreate) if (d._id) quiet.add(d._id);
+    const created = await Item5e.createDocuments(toCreate, { parent: group, keepId: true });
+    row = created.find(i => i.getFlag(MODULE_ID, "giveTo")) ?? created[0];
+    await item.delete({ deleteContents: true });
+  } else {
+    const data = carriedData(item, n);
+    foundry.utils.setProperty(data, `flags.${MODULE_ID}.giveTo`, mark);
+    [row] = await group.createEmbeddedDocuments("Item", [data]);
+    quiet.add(row.id);
+    if (n >= max) await item.delete();
+    else await item.update({ "system.quantity": max - n });
+  }
+
+  const deadline = Date.now() + GIVE_WAIT;
+  while (Date.now() < deadline && group.items.get(row.id)) {
+    await new Promise(r => setTimeout(r, 250));
+  }
+  if (!group.items.get(row.id)) {
+    ui.notifications.info(`Gave ${container ? 1 : n} × ${name} to ${to.name}.`);
+    return;
+  }
+
+  // Stalled. Take it back — unless the recipient gets there first after all.
+  const live = group.items.get(row.id);
+  const back = live ? await claimRow(live, actor) : 0;
+  if (back) {
+    ui.notifications.error(`Party Stash: problem finding ${user.name} to give ${to.name} the `
+      + `${name}. It's back with ${actor.name}. Try again.`);
+  } else {
+    ui.notifications.info(`Gave ${container ? 1 : n} × ${name} to ${to.name}.`);
+  }
+}
+
+/**
+ * Move a marked stash row onto `dest` — the recipient's half, and the giver's revert. THE
+ * GUARD lives here: credit first, then delete the row; the delete decides. A delete that
+ * throws, or that deletes nothing (the row was already gone), means another client got
+ * there first, and this client undoes its own credit. Returns how many moved, 0 when lost.
+ */
+async function claimRow(row, dest) {
+  const group = row.parent;
+  const n = stackCount(row);
+  const container = row.type === "container";
+  quiet.add(row.id);
+  for (const id of cargoIds(row)) quiet.add(id);
+
+  let undo;
+  if (container) {
+    const Item5e = row.constructor;
+    const toCreate = await Item5e.createWithContents([row]);
+    if (toCreate[0]?.flags?.[MODULE_ID]) delete toCreate[0].flags[MODULE_ID];
+    // keepId: the container and its cargo arrive under their stash ids, so a second client
+    // crediting the same gift is refused by the server before the guard even runs.
+    const created = await Item5e.createDocuments(toCreate, { parent: dest, keepId: true });
+    const ids = created.map(i => i.id);
+    undo = async () => dest.deleteEmbeddedDocuments("Item", ids.filter(id => dest.items.has(id)));
+  } else {
+    undo = await creditStack(row, dest, n);
+  }
+
+  let won = false;
+  try {
+    const deleted = await row.delete({ deleteContents: true });
+    won = !!deleted;
+  } catch (err) {
+    console.warn(`${MODULE_ID} | the deciding delete failed — another client has this gift`, err);
+    won = false;
+  }
+  if (won) return n;
+  try {
+    await undo();
+  } catch (err) {
+    console.error(`${MODULE_ID} | undoing a lost claim failed — a duplicate may remain`, err);
+  }
+  return 0;
+}
+
+/** The recipient's half: claim a row marked for this user, then tell the table. */
+async function finishGive(row, mark) {
+  const to = game.actors.get(mark.actor);
+  const from = game.actors.get(mark.from);
+  if (!to?.isOwner) return; // can't finish; the giver's timeout takes it back
+  const cargo = row.type === "container";
+  const name = row.name;
+  try {
+    const moved = await claimRow(row, to);
+    if (!moved) return;
+    ui.notifications.info(`${from?.name ?? "Someone"} gave ${to.name} ${moved} × ${name}.`);
+    postGiveReceipt(from, to, name, moved, cargo);
+  } catch (err) {
+    console.error(`${MODULE_ID} | finishing a gift failed`, err);
+  }
+}
+
+/** The recipient's trigger: a marked row arriving in a group, addressed to this user. */
+Hooks.on("createItem", (item, options, userId) => {
+  try {
+    const mark = item.getFlag?.(MODULE_ID, "giveTo");
+    if (!mark || item.parent?.type !== "group" || mark.user !== game.user.id) return;
+    if (!game.settings.get(MODULE_ID, "give")) return;
+    void finishGive(item, mark);
+  } catch (err) {
+    console.error(`${MODULE_ID} | give trigger failed`, err);
+  }
+});
+
+/**
+ * Leftovers on login. The one way a marked row outlives a hand-off is the giver's client
+ * closing before its timeout and the recipient never acting. The recipient's client claims
+ * anything addressed to it; the giver's client takes back anything it sent that has sat past
+ * GIVE_WAIT. Both go through the guard, so if both are here, exactly one wins.
+ */
+Hooks.once("ready", () => {
+  try {
+    if (!game.settings.get(MODULE_ID, "give")) return;
+    for (const group of game.actors) {
+      if (group.type !== "group") continue;
+      for (const row of group.items) {
+        const mark = row.getFlag(MODULE_ID, "giveTo");
+        if (!mark) continue;
+        if (mark.user === game.user.id) void finishGive(row, mark);
+        else if (mark.fromUser === game.user.id && Date.now() - (mark.at ?? 0) > GIVE_WAIT) {
+          const from = game.actors.get(mark.from);
+          if (!from?.isOwner) continue;
+          claimRow(row, from).then(back => {
+            if (back) ui.notifications.warn(`Party Stash: ${row.name} came back to ${from.name} — `
+              + `${game.users.get(mark.user)?.name ?? "the recipient"} never picked it up.`);
+          }).catch(err => console.error(`${MODULE_ID} | taking back a stale gift failed`, err));
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`${MODULE_ID} | the gift sweep failed`, err);
+  }
 });
 
 /**
