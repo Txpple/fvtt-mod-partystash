@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Party Stash Give Button</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Signika:wght@400;600;700&family=Roboto+Condensed:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+  :root{
+    --ground:#15171b; --canvas:#1e2126; --panel:#24272d; --panel-2:#2b2f36; --line:#3a3f48;
+    --ink:#e8e3d6; --ink-2:#b5b0a4; --ink-3:#7d7a72; --gold:#9f9275; --gold-soft:rgba(159,146,117,.18);
+    --info:rgb(70,120,170); --warn:rgb(222,120,40); --bad:rgb(180,70,60); --good:rgb(70,150,95);
+    --font:"Signika",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --cond:"Roboto Condensed","Signika",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45;color-scheme:dark}
+  .wrap{max-width:1380px;margin:0 auto;padding:22px 20px 40px}
+  header.top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+  header.top h1{margin:0;font-size:22px;font-weight:600}
+  header.top p{margin:0;color:var(--ink-2);max-width:70ch}
+  b{font-weight:600}
+
+  /* ---- scenario pickers ---- */
+  .scenes{display:flex;flex-wrap:wrap;gap:10px 22px;margin-bottom:14px}
+  .grp{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .grp>span{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:600;margin-right:4px}
+  .grp button{font:inherit;font-size:12px;color:var(--ink-2);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:4px 10px;cursor:pointer}
+  .grp button[aria-pressed="true"]{color:var(--ink);background:var(--panel-2);border-color:var(--gold)}
+  .grp button.reset{margin-left:6px;border-style:dashed}
+
+  .studio{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+  @media (max-width:980px){.studio{grid-template-columns:1fr}}
+
+  /* ---- the mock Foundry screen ---- */
+  .screen{position:relative;height:620px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--canvas)}
+  .map{position:absolute;inset:0;
+    background-image:
+      radial-gradient(ellipse at 30% 40%,rgba(90,110,80,.22),transparent 55%),
+      radial-gradient(ellipse at 70% 70%,rgba(120,90,60,.18),transparent 50%),
+      linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);
+    background-size:auto,auto,50px 50px,50px 50px}
+  .sidebar{position:absolute;right:0;top:0;bottom:0;width:260px;background:#1a1c20;border-left:1px solid var(--line);display:flex;flex-direction:column}
+  .sidebar .tabs{display:flex;gap:2px;padding:6px;border-bottom:1px solid var(--line)}
+  .sidebar .tabs i{flex:1;height:22px;border-radius:3px;background:rgba(255,255,255,.06)}
+  .sidebar .tabs i:first-child{background:rgba(255,255,255,.14)}
+  .chat{flex:1;padding:8px;display:flex;flex-direction:column;gap:8px;overflow:auto}
+  .chat .ey{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+  .msg{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 10px;font-size:12px;color:var(--ink-2)}
+  .msg .spk{font-weight:600;color:var(--ink);font-size:11px;margin-bottom:2px;display:flex;justify-content:space-between}
+  .msg .spk small{font-weight:400;color:var(--ink-3)}
+  .msg b{color:var(--ink)}
+  .msg .whisper{font-size:10px;color:var(--ink-3);font-style:italic}
+
+  /* notifications, Foundry-style: top centre of the canvas */
+  .toasts{position:absolute;left:0;right:260px;top:8px;display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none;z-index:30}
+  .toast{max-width:520px;padding:6px 14px;border-radius:3px;font-size:13px;color:#fff;border-left:5px solid rgba(255,255,255,.35);box-shadow:0 2px 8px rgba(0,0,0,.5);animation:in .15s ease-out}
+  .toast.info{background:var(--info)} .toast.warn{background:var(--warn)} .toast.error{background:var(--bad)}
+  @keyframes in{from{transform:translateY(-6px);opacity:0}to{transform:none;opacity:1}}
+
+  /* ---- the character sheet (dnd5e2, dark theme) ---- */
+  .sheet{position:absolute;left:28px;top:34px;width:760px;background:#2a2622;border:1px solid var(--gold);border-radius:5px;box-shadow:0 4px 18px rgba(0,0,0,.6);color:var(--ink);overflow:hidden}
+  .sheet .win{display:flex;align-items:center;gap:8px;padding:4px 10px;background:#1d1a17;border-bottom:1px solid var(--gold);font-size:12px}
+  .sheet .win .x{margin-left:auto;color:var(--ink-3)}
+  .sheet .hdr{display:flex;align-items:center;gap:12px;padding:10px 14px;background:linear-gradient(90deg,rgba(159,146,117,.18),transparent)}
+  .sheet .hdr .pic{width:46px;height:46px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#7a6b4e,#2a2622);border:2px solid var(--gold)}
+  .sheet .hdr h2{margin:0;font-size:18px;font-weight:600}
+  .sheet .hdr .sub{font-size:12px;color:var(--ink-2)}
+  .sheet .tabs{display:flex;gap:14px;padding:0 14px;border-bottom:1px solid var(--line);font-family:var(--cond);font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3)}
+  .sheet .tabs span{padding:6px 0}
+  .sheet .tabs span.on{color:var(--ink);border-bottom:2px solid var(--gold)}
+  .inv{padding:8px 10px 12px}
+  .section{margin-bottom:8px}
+  .section .sh{display:flex;align-items:center;gap:0;padding:4px 6px;font-family:var(--cond);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);border-bottom:1px solid var(--line)}
+  .section .sh .item-name{color:var(--ink);font-weight:700;text-transform:none;letter-spacing:0;font-size:13px}
+  .item{display:flex;align-items:center;padding:2px 6px;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;min-height:32px}
+  .item:hover{background:rgba(255,255,255,.04)}
+  .item-name{flex:1;display:flex;align-items:center;gap:8px;min-width:0}
+  .item-name img,.item-name .img{width:26px;height:26px;border-radius:3px;background:#4a4238;border:1px solid var(--line);display:inline-block;flex:none}
+  .item-name .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item-name .nm small{color:var(--ink-3);margin-left:6px}
+  .item-detail{width:72px;text-align:center;color:var(--ink-2);font-size:12px;display:flex;justify-content:center}
+  .item-controls{width:96px;display:flex;justify-content:flex-end;gap:10px;color:var(--ink-3);font-size:12px;padding-right:6px}
+  .item-controls i{cursor:pointer}
+  .item-controls i:hover{color:var(--ink)}
+  .col-ps{width:84px;justify-content:center}
+  .col-ps.wide{width:160px;gap:6px}
+  .col-ps.ghost{width:84px;color:var(--ink-3);font-size:11px;font-style:italic}
+  /* Party Stash's buttons, as styles/partystash.css draws them on the sheet */
+  .ps-btn{display:inline-flex;align-items:center;gap:4px;width:auto;padding:0 10px;line-height:26px;white-space:nowrap;cursor:pointer;
+    font-family:var(--cond);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink);
+    background:rgba(0,0,0,.35);border:1px solid var(--gold);border-radius:3px}
+  .ps-btn:hover{background:var(--gold);border-color:var(--gold);color:#191813}
+  .ps-btn i{font-size:.75em;opacity:.9}
+  .ruler{position:absolute;left:28px;top:376px;width:760px;font-size:11px;color:var(--ink-3);display:flex;justify-content:flex-end;gap:0}
+  .ruler span{border-top:1px solid var(--ink-3);text-align:center;padding-top:2px}
+
+  /* the row's context menu */
+  .ctx{position:absolute;background:#1d1a17;border:1px solid var(--gold);border-radius:3px;min-width:150px;z-index:20;box-shadow:0 4px 14px rgba(0,0,0,.6);font-size:12px}
+  .ctx div{padding:5px 10px;cursor:pointer;display:flex;gap:8px;align-items:center}
+  .ctx div:hover{background:var(--gold-soft)}
+  .ctx div i{width:14px;color:var(--ink-3)}
+  .ctx div.ps{border-top:1px solid var(--line)}
+
+  /* ---- DialogV2, as the module's other prompts look ---- */
+  .veil{position:absolute;inset:0;background:rgba(0,0,0,.35);z-index:40}
+  .dlg{position:absolute;left:50%;top:150px;width:360px;transform:translateX(-50%);background:#2a2622;border:1px solid var(--gold);border-radius:5px;box-shadow:0 6px 24px rgba(0,0,0,.7);z-index:41}
+  .dlg .t{display:flex;align-items:center;gap:8px;padding:5px 10px;background:#1d1a17;border-bottom:1px solid var(--gold);font-size:13px;font-weight:600}
+  .dlg .t .x{margin-left:auto;color:var(--ink-3);cursor:pointer;font-weight:400}
+  .dlg form{padding:10px 12px 12px}
+  .dlg p{margin:0 0 10px}
+  .dlg .hint{font-size:12px;color:var(--ink-3);margin:4px 0 0}
+  .form-group{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .form-group label{width:70px;font-weight:600;font-size:13px}
+  .form-fields{flex:1;display:flex;gap:6px}
+  .form-group .hint{width:100%;margin:-4px 0 0 80px}
+  .dlg select,.dlg input{font:inherit;color:var(--ink);background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:3px;padding:4px 6px;width:100%}
+  .dlg footer{display:flex;gap:8px;margin-top:4px}
+  .dlg footer button{flex:1;font:inherit;font-size:13px;padding:6px 8px;border-radius:3px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+  .dlg footer button.primary{border-color:var(--gold);background:var(--gold-soft)}
+  .dlg footer button:hover{background:var(--gold);color:#191813}
+
+  /* ---- the notes column ---- */
+  .side{display:flex;flex-direction:column;gap:12px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+  .panel h3{margin:0 0 6px;font-size:13px;font-weight:600}
+  .panel p,.panel li{margin:0 0 6px;font-size:13px;color:var(--ink-2)}
+  .panel ul,.panel ol{margin:0;padding-left:18px}
+  .panel li b{color:var(--ink)}
+  .panel.q{border-color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Give: hand an item straight to a party member</h1>
+    <p>Ann's player is looking at Ann's inventory. Stash is the button that exists today; Give is the new one. Pick a layout and who is online, then press Give on a row and answer the prompt. Underneath, the item goes through the party stash and the other player's client finishes the move, so no GM is needed.</p>
+  </header>
+
+  <div class="scenes">
+    <div class="grp" id="g-layout"><span>Where Give sits</span>
+      <button data-v="A">A · its own column</button>
+      <button data-v="B">B · one column, both buttons</button>
+      <button data-v="C">C · in the row's menu</button>
+    </div>
+    <div class="grp" id="g-online"><span>Online now</span>
+      <button data-v="Sam">Sam (Bob)</button>
+      <button data-v="Lee">Lee (Cora)</button>
+      <button data-v="Mara">Mara (the GM)</button>
+    </div>
+    <div class="grp" id="g-npc"><span>NPC members</span>
+      <button data-v="out">left out</button>
+      <button data-v="in">listed when the GM is online</button>
+    </div>
+    <div class="grp" id="g-client"><span>Recipient's client</span>
+      <button data-v="answers">answers</button>
+      <button data-v="silent">doesn't answer</button>
+      <button class="reset" data-act="reset">Reset the inventory</button>
+    </div>
+  </div>
+
+  <div class="studio">
+    <div class="screen">
+      <div class="map"></div>
+      <div class="toasts" id="toasts"></div>
+      <div class="sheet" id="sheet"></div>
+      <div class="ruler" id="ruler"></div>
+      <div id="overlay"></div>
+      <div class="sidebar">
+        <div class="tabs"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="chat"><div class="ey">Chat</div><div id="chat"></div></div>
+      </div>
+    </div>
+    <div class="side" id="side"></div>
+  </div>
+</div>
+
+<script>
+const PARTY = "The Party";
+const ME = { actor: "Ann Thistlewood", short: "Ann", user: "you" };
+const MEMBERS = [
+  { id: "bob",  actor: "Bob Ashvale",      user: "Sam",  npc: false },
+  { id: "cora", actor: "Cora Vell",        user: "Lee",  npc: false },
+  { id: "dax",  actor: "Dax the Hireling", user: "Mara", npc: true }
+];
+const ITEMS0 = [
+  { id: "longsword", name: "Longsword",         section: "Weapons",     qty: 1, weight: "3 lb",   price: "15 GP" },
+  { id: "antitoxin", name: "Antitoxin",         section: "Consumables", qty: 4, weight: "—",      price: "50 GP" },
+  { id: "potion",    name: "Potion of Healing", section: "Consumables", qty: 2, weight: "0.5 lb", price: "50 GP" },
+  { id: "backpack",  name: "Backpack",          section: "Containers",  qty: 1, weight: "5 lb",   price: "2 GP", container: true, contents: 3 }
+];
+const LAYOUT_NOTES = {
+  A: ["A · its own column", "Give is an 84px column after Stash, built the way Stash was: a column id, a template, a width rule. Two columns cost 168px on the busiest sheet in the game; the ruler under the sheet shows it."],
+  B: ["B · one column, both buttons", "One 160px column holds Stash and Give side by side. It saves 8px over A and reads as a pair, but the header has no single word for the column."],
+  C: ["C · in the row's menu", "Stash keeps its column; Give goes into the row's context menu (the ⋮ control, or a right-click) as \"Give to…\". No width at all, and no button to find either, which is the problem Take and Stash were built to fix."]
+};
+const state = {
+  layout: "A", online: { Sam: true, Lee: true, Mara: true }, npc: "out", client: "answers",
+  items: structuredClone(ITEMS0), dialog: null, menu: null, toasts: [], chat: [], seq: 0
+};
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* Who can receive: a member whose player is online (their client finishes the move) and
+   who also owns the group. In this mock everyone owns The Party. */
+function recipients() {
+  return MEMBERS.filter(m => state.online[m.user] && (!m.npc || state.npc === "in"));
+}
+function recipientLabel(m) { return `${m.actor} (${m.user}${m.npc ? ", GM" : ""})`; }
+
+/* ---- the sheet ---- */
+function rowHTML(it) {
+  const stash = `<button class="ps-btn" data-act="stash" data-id="${it.id}"><i class="fa-solid fa-box-open"></i><span>Stash</span></button>`;
+  const give  = `<button class="ps-btn" data-act="give" data-id="${it.id}"><i class="fa-solid fa-people-arrows"></i><span>Give</span></button>`;
+  const cols = state.layout === "A" ? `<div class="item-detail col-ps">${stash}</div><div class="item-detail col-ps">${give}</div>`
+             : state.layout === "B" ? `<div class="item-detail col-ps wide">${stash}${give}</div>`
+             : `<div class="item-detail col-ps">${stash}</div>`;
+  return `<li class="item" data-id="${it.id}">
+    <div class="item-name"><span class="img"></span><span class="nm">${esc(it.name)}${it.container ? `<small>${it.contents} items inside</small>` : ""}</span></div>
+    <div class="item-detail">${it.weight}</div>
+    <div class="item-detail">${it.price}</div>
+    <div class="item-detail">${it.qty}</div>
+    <div class="item-controls"><i class="fa-solid fa-shield-halved" title="Equip"></i><i class="fa-solid fa-pen-to-square" title="Edit"></i><i class="fa-solid fa-trash" title="Delete"></i><i class="fa-solid fa-ellipsis-vertical" data-act="menu" data-id="${it.id}" title="Context menu"></i></div>
+    ${cols}
+  </li>`;
+}
+function headerCols() {
+  return state.layout === "A" ? `<div class="item-detail col-ps">Stash</div><div class="item-detail col-ps">Give</div>`
+       : state.layout === "B" ? `<div class="item-detail col-ps wide">Party Stash</div>`
+       : `<div class="item-detail col-ps">Stash</div>`;
+}
+function sheetHTML() {
+  const sections = ["Weapons", "Consumables", "Containers"].map(sec => {
+    const rows = state.items.filter(i => i.section === sec);
+    if (!rows.length) return "";
+    return `<div class="section">
+      <div class="sh"><div class="item-name">${sec}</div><div class="item-detail">Weight</div><div class="item-detail">Price</div><div class="item-detail">Quantity</div><div class="item-controls"></div>${headerCols()}</div>
+      <ul style="list-style:none;margin:0;padding:0">${rows.map(rowHTML).join("")}</ul>
+    </div>`;
+  }).join("");
+  return `<div class="win"><i class="fa-solid fa-user"></i> ${ME.actor} <span class="x">✕</span></div>
+    <div class="hdr"><div class="pic"></div><div><h2>${ME.actor}</h2><div class="sub">Human Fighter 5 · member of ${PARTY}</div></div></div>
+    <div class="tabs"><span>Details</span><span class="on">Inventory</span><span>Features</span><span>Spells</span><span>Effects</span><span>Biography</span></div>
+    <div class="inv">${sections}</div>`;
+}
+function rulerHTML() {
+  if (state.layout === "A") return `<span style="width:84px">Stash 84px</span><span style="width:84px">Give 84px</span>`;
+  if (state.layout === "B") return `<span style="width:160px">one column, 160px</span>`;
+  return `<span style="width:84px">Stash 84px</span>`;
+}
+
+/* ---- the Give prompt ---- */
+function openGive(id) {
+  state.menu = null;
+  const list = recipients();
+  if (!list.length) {
+    toast("warn", `Party Stash: no party members to give to — nobody else in ${PARTY} is online right now.`);
+    return render();
+  }
+  state.dialog = { id, partner: list[0].id, qty: 1 };
+  render();
+}
+function dialogHTML() {
+  const d = state.dialog; if (!d) return "";
+  const it = state.items.find(i => i.id === d.id);
+  const list = recipients();
+  const askQty = !it.container && it.qty > 1;
+  const detail = askQty ? ` There are ${it.qty}.` : it.container ? " It moves with its contents." : "";
+  const one = list.length === 1 ? list[0] : null;
+  const question = one
+    ? `Give <strong>${esc(it.name)}</strong> to <strong>${esc(one.actor)}</strong>?${detail}`
+    : `Give <strong>${esc(it.name)}</strong> to a party member?${detail}`;
+  const partnerField = one ? "" :
+    `<div class="form-group"><label>To</label><div class="form-fields"><select name="partner">${list.map(m => `<option value="${m.id}" ${m.id === d.partner ? "selected" : ""}>${esc(recipientLabel(m))}</option>`).join("")}</select></div></div>`;
+  const qtyField = askQty
+    ? `<div class="form-group"><label>Quantity</label><div class="form-fields"><input type="number" name="qty" value="${d.qty}" min="1" max="${it.qty}" step="1" autofocus></div><p class="hint">Up to ${it.qty}.</p></div>`
+    : "";
+  return `<div class="veil" data-act="cancel"></div>
+  <div class="dlg" role="dialog"><div class="t"><i class="fa-solid fa-people-arrows"></i> Give ${esc(it.name)} <span class="x" data-act="cancel">✕</span></div>
+    <form id="giveform"><p>${question}</p>${partnerField}${qtyField}
+      <footer><button type="submit" class="primary"><i class="fa-solid fa-people-arrows"></i> Give</button><button type="button" data-act="cancel">Cancel</button></footer>
+    </form></div>`;
+}
+
+/* ---- what happens when Give is pressed ----
+   The giver's client: the chosen amount goes into the stash as its own row, marked for the
+   recipient's player, then comes off Ann. That is the debit the sheet shows at once. The
+   recipient's client then moves the row onto their character and deletes it from the stash;
+   when the stash row goes, Ann's client reports the gift. If it is still there after a few
+   seconds, Ann's client takes it back and says so. */
+function submitGive(form) {
+  const d = state.dialog; const it = state.items.find(i => i.id === d.id);
+  const list = recipients();
+  const partner = list.find(m => m.id === (form.elements.partner?.value ?? list[0].id)) ?? list[0];
+  const n = it.container ? 1 : Math.max(1, Math.min(it.qty, Math.floor(form.elements.qty?.valueAsNumber || 1)));
+  state.dialog = null;
+  const index = state.items.indexOf(it);
+  const snapshot = structuredClone(it);
+  if (n >= it.qty) state.items.splice(index, 1); else it.qty -= n;
+  render();
+  if (state.client === "silent") {
+    setTimeout(() => {
+      const back = state.items.find(i => i.id === snapshot.id);
+      if (back) back.qty += n; else state.items.splice(Math.min(index, state.items.length), 0, snapshot);
+      toast("error", `Party Stash: problem finding ${partner.user} to give ${partner.actor} the ${snapshot.name}. It's back with ${ME.short}. Try again.`);
+      render();
+    }, 3000);
+  } else {
+    setTimeout(() => {
+      toast("info", `Gave ${n} × ${snapshot.name} to ${partner.actor}.`);
+      state.chat.unshift({ who: "Party Stash", line: `<b>${esc(ME.short)}</b> gave ${n} × ${esc(snapshot.name)} to <b>${esc(partner.actor)}</b>`, whisper: `to ${partner.user} and the DMs` });
+      render();
+    }, 700);
+  }
+}
+
+/* ---- notifications and chat ---- */
+function toast(kind, text) {
+  const id = ++state.seq;
+  state.toasts.push({ id, kind, text });
+  setTimeout(() => { state.toasts = state.toasts.filter(t => t.id !== id); render(); }, kind === "error" ? 7000 : 4500);
+}
+function chatHTML() {
+  if (!state.chat.length) return `<div class="msg" style="color:var(--ink-3)">Receipts land here.</div>`;
+  return state.chat.map(m => `<div class="msg"><div class="spk">${m.who}<small>just now</small></div><div>${m.line}</div><div class="whisper">${m.whisper} · one line, not a stash-in and a take-out</div></div>`).join("");
+}
+function menuHTML() {
+  const m = state.menu; if (!m) return "";
+  const give = state.layout === "C" ? `<div class="ps" data-act="give" data-id="${m.id}"><i class="fa-solid fa-people-arrows"></i>Give to…</div>` : "";
+  return `<div class="ctx" style="left:${m.x}px;top:${m.y}px">
+    <div><i class="fa-solid fa-pen-to-square"></i>Edit</div><div><i class="fa-solid fa-copy"></i>Duplicate</div><div><i class="fa-solid fa-trash"></i>Delete</div>${give}</div>`;
+}
+
+/* ---- the notes column ---- */
+function sideHTML() {
+  const [h, p] = LAYOUT_NOTES[state.layout];
+  const list = recipients();
+  return `
+    <div class="panel"><h3>${h}</h3><p>${p}</p></div>
+    <div class="panel"><h3>Who Ann can give to right now</h3>
+      <p>${list.length ? list.map(recipientLabel).map(esc).join("<br>") : "Nobody: the prompt says so instead of opening an empty list."}</p>
+      <p>Only members whose player is online are offered, because that player's client does the second half of the move. ${state.npc === "in" ? "Dax has no player; the GM's client stands in for one while a GM is online." : "Dax has no player, so Dax is left out."}</p></div>
+    <div class="panel"><h3>Underneath, in order</h3><ol>
+      <li><b>Ann's client</b> puts the amount in ${PARTY} as its own row, marked for the recipient's player, then takes it off Ann. Credit before debit.</li>
+      <li><b>The recipient's client</b> sees the marked row, moves it onto their character (merging into a stack they already hold), and deletes it from the stash.</li>
+      <li><b>One receipt</b>, posted when the move finishes. The stash's own in/out receipts skip marked rows.</li>
+      <li><b>If the row is still there after a few seconds</b>, Ann's client takes it back and shows the error. Try "doesn't answer" above.</li></ol></div>
+    <div class="panel q"><h3>To rule</h3><ul>
+      <li><b>Layout:</b> A, B or C.</li>
+      <li><b>Nobody online:</b> a warning toast (shown), or a small dialog with an OK button?</li>
+      <li><b>NPC members:</b> left out, or listed while a GM is online?</li>
+      <li><b>While waiting:</b> nothing shows between the press and the result (shown). Worth a "giving…" line, or is under a second too short to matter?</li>
+      <li><b>The icon:</b> people-arrows (shown), handshake, or gift?</li></ul></div>`;
+}
+
+function render() {
+  for (const [g, key] of [["g-layout", "layout"], ["g-npc", "npc"], ["g-client", "client"]])
+    document.querySelectorAll(`#${g} button[data-v]`).forEach(b => b.setAttribute("aria-pressed", b.dataset.v === state[key]));
+  document.querySelectorAll("#g-online button").forEach(b => b.setAttribute("aria-pressed", !!state.online[b.dataset.v]));
+  document.getElementById("sheet").innerHTML = sheetHTML();
+  document.getElementById("ruler").innerHTML = rulerHTML();
+  document.getElementById("overlay").innerHTML = menuHTML() + dialogHTML();
+  document.getElementById("toasts").innerHTML = state.toasts.map(t => `<div class="toast ${t.kind}">${esc(t.text)}</div>`).join("");
+  document.getElementById("chat").innerHTML = chatHTML();
+  document.getElementById("side").innerHTML = sideHTML();
+  document.querySelector("#giveform input[autofocus]")?.focus();
+}
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act],[data-v]");
+  if (!el) { if (state.menu) { state.menu = null; render(); } return; }
+  if (el.closest("#g-layout")) state.layout = el.dataset.v;
+  else if (el.closest("#g-online")) state.online[el.dataset.v] = !state.online[el.dataset.v];
+  else if (el.closest("#g-npc")) state.npc = el.dataset.v;
+  else if (el.closest("#g-client") && el.dataset.v) state.client = el.dataset.v;
+  else if (el.dataset.act === "reset") { state.items = structuredClone(ITEMS0); state.chat = []; }
+  else if (el.dataset.act === "give") return openGive(el.dataset.id);
+  else if (el.dataset.act === "stash") { toast("info", "Stash: today's button, unchanged. Not mocked here."); }
+  else if (el.dataset.act === "menu") {
+    const r = el.getBoundingClientRect(), s = document.querySelector(".screen").getBoundingClientRect();
+    state.menu = { id: el.dataset.id, x: r.left - s.left - 140, y: r.bottom - s.top + 2 };
+  }
+  else if (el.dataset.act === "cancel") state.dialog = null;
+  render();
+});
+document.addEventListener("contextmenu", e => {
+  const row = e.target.closest(".item"); if (!row) return;
+  e.preventDefault();
+  const s = document.querySelector(".screen").getBoundingClientRect();
+  state.menu = { id: row.dataset.id, x: e.clientX - s.left, y: e.clientY - s.top }; render();
+});
+document.addEventListener("submit", e => { if (e.target.id === "giveform") { e.preventDefault(); submitGive(e.target); } });
+document.addEventListener("change", e => {
+  if (!state.dialog) return;
+  if (e.target.name === "partner") state.dialog.partner = e.target.value;
+  if (e.target.name === "qty") state.dialog.qty = e.target.valueAsNumber;
+});
+render();
+</script>
+</body>
+</html>
