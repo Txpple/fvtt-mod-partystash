@@ -1,187 +1,146 @@
 # Party Stash
 
-True move semantics for the shared party stash in **dnd5e**. Stock drag-and-drop between
-actor sheets *copies* an item, so stocking a Group actor's shared inventory from a member's
-sheet leaves a duplicate behind. With this module, dragging an item between a Group actor
-and one of its members **moves** it — the source item is deleted once the drop has landed —
-in both directions:
+A Foundry VTT module for the dnd5e system that makes a Group actor's inventory a working party
+stash. Stock drag-and-drop between sheets *copies* an item, so stocking the stash left a duplicate
+behind; coin could not move at all without the system's currency manager; and a stack could only
+move whole. Party Stash moves items in and out of the stash, moves coin through a small dialog,
+splits stacks, hands items between members, and posts a receipt for every transfer.
 
-- member's sheet → group sheet (stash an item),
-- group sheet → member's sheet (hand an item out),
-- group inventory → a member's row inside the group sheet (same as handing it out).
+## How it works
 
-The move only applies when **all** of the following hold; every other drag keeps the stock
-copy behavior:
+- **A drag between the stash and a member moves the item.** The source is deleted only after the
+  copy has landed. Every other drag (character to character, looting an NPC, compendium drops) keeps
+  the stock copy behaviour, and Ctrl-drag still copies anywhere.
+- **Coin moves through Deposit and Withdraw buttons** on the group's currency row. For players the
+  purse fields are read-only, so the dialog is the one way coin moves; GMs keep the editable row.
+- **Stacks split.** A move asks how many; the rest stays put.
+- **Three buttons on inventory rows:** Take on the group sheet, Stash and Give on member character
+  sheets. Give hands an item straight to another party member, with no GM involved.
+- **Every transfer posts a receipt** to chat: who moved what, in or out of the stash. Receipts go
+  to the whole table or to the transfer's participants and the DMs.
+- **The destination is credited before the source is debited**, everywhere. A failure leaves a
+  duplicate, never a loss, and the receipt shows it.
 
-- the item is a physical item dragged between a Group actor and **one of its own members**
-  (PC↔PC gifting, NPC looting, sidebar/compendium drops are untouched),
-- the dragging user **owns both sides**.
-
-If only **one** side is owned — say a player drags a fellow member's gear into the stash from
-that member's read-only sheet — the drop is **blocked** (no-drop cursor plus a warning)
-rather than silently falling back to a copy: the server would refuse the source delete and a
-duplicate would be stranded. When a duplicate is actually what you want, Ctrl-drag still
-copies.
-
-Under the hood this only changes dnd5e's *default* drop behavior for that one case — the
-system's own move pipeline does the actual work. That buys the safe ordering (the source is
-deleted only after the copy has actually been created), consumable stack merging, and
-container contents coming along for the ride. It also means the standard dnd5e drag
-modifiers still work everywhere:
-
-- **Ctrl-drag** (or Alt-drag) — force a plain **copy**, even to/from the stash,
-- **Shift-drag** — force a **move** for any drag dnd5e allows (e.g. looting an NPC).
-
-Sibling of [Loot Shelf](https://github.com/Txpple/fvtt-mod-lootshelf) — Party Stash owns the
-shared party inventory; Loot Shelf owns loot on the ground and goods for sale. Neither needs
-the other installed, but they are built to the same manners — a purse is never re-minted
-behind your back and both make change the same way when it must be made, the destination is
-credited before the source is debited, and their receipts are configured the same way and
-read as one running account of the party's stuff.
-
-## Moving coin
-
-Items move by dragging; coin can't be dragged. So the group sheet's currency row gets two
-buttons — **Deposit** and **Withdraw** — and for players the purse fields themselves become
-**read-only**, along with the system's own currency-manager button, so the dialog is the one
-way coin moves in or out of the stash. GMs keep the stock editable row and the system button.
-
-The dialog is five boxes, one per denomination, each **capped at what the source can
-afford** — so an unaffordable transfer can't even be typed. An **Everything** button fills
-all five, which is the whole gesture after a fight. If you own more than one member, a picker
-chooses whose purse the coin comes from (or goes to).
-
-Coin the source holds loose moves **denomination by denomination**: two platinum leaving the
-stash arrive as two platinum, never twenty gold. But ask for coin the source *doesn't* hold
-loose — say 15 gp from a stash of 3 pp 15 sp — and the dialog **makes change**: the shortfall
-is minted for the destination and paid for out of the rest of the purse (small coins spent
-first, the smallest coin that covers the remainder broken, its change returned to the source
-in gp/sp/cp). You receive exactly the denominations you typed; only the source purse is
-re-composed, the dialog says so before it happens, and the receipt records that change was
-made. The destination is credited before the source is debited, so a failure duplicates coin
-rather than destroying it — and the receipt shows it either way.
-
-## Taking and splitting stacks
-
-dnd5e's own drag moves a **whole stack** — quantity isn't part of its drop pipeline at all.
-Party Stash fixes that both ways:
-
-- **Drag an item** between the stash and a member (any owned move the module already
-  handles) and a prompt asks first. For a stack it asks **how many** — defaulting to the
-  whole stack, so drag-and-Enter behaves exactly as before; choose fewer and the stack
-  splits, with the chosen amount merging into an existing stack of the same consumable
-  rather than opening a second row, and the rest staying put. A single item or a container
-  asks a plain confirmation instead, so a mis-drop never moves loot silently; containers
-  move whole, cargo and all.
-- **Every row of the group inventory gets a Take button.** Press it and the item goes to a
-  member you own — with the same quantity prompt when the stack is bigger than one
-  (defaulting to 1), a plain confirmation for single items and containers so a misclick
-  never moves loot silently, and a destination picker only when you own more than one
-  member. It is
-  Loot Shelf's shelf **Buy** gesture pointed the other way, and it exists because the drag
-  alternative is invisible: a player who can't find it reaches for the context menu's
-  Duplicate and mints "(Copy)" clones instead.
-- **Member character sheets get the mirror-image Stash button** on every inventory row,
-  moving the item into the group's inventory with the same quantity prompt. The column only
-  appears on characters that actually belong to a group — a loner's sheet is untouched.
-- **Beside Stash, a Give button** hands an item straight to another party member. Press it
-  and pick who — the list offers the members whose player is **online** (if you belong to
-  more than one party, a party picker sits above it) — with the same quantity prompt. If
-  nobody else is online, a notice says so instead of an empty list.
-
-The buttons sit past the system's own row controls, at the far right edge (Stash and Give
-share one column), and the group sheet drops the per-row equip toggle — nobody wields a
-sword out of the party's bag.
-
-## Giving
-
-A player owns their own character, not their partymates', so no player client can write an
-item onto another member's sheet — and Party Stash never relies on a GM being online. Give
-therefore takes the road the table already used by hand (Stash, then the other player Takes)
-and makes it one gesture: your client puts the item in the stash **marked for the recipient's
-player**, and that player's client moves it onto their character and clears the stash row.
-One receipt — *"Ann gave 2 × Antitoxin to Bob"* — not a stash-in and a take-out.
-
-If the other player's client never answers (they logged off between your press and the move,
-say), the item comes back to you after a few seconds with an error asking you to try again;
-nothing is left waiting in the stash. Whichever client clears the stash row owns the gift, so
-a slow recipient and the take-back can never both keep a copy. A member you own yourself (a
-GM, or a second character of yours) simply receives the item directly. NPC members have no
-player and are not offered. Dragging from one character sheet to another is unchanged — still
-a stock copy.
-
-Splits follow the same ordering as coin: the target is credited before the source is
-debited, so a failure duplicates items rather than destroying them — and the receipt names
-who took what either way.
-
-## Transfer receipts
-
-Every loot transfer in or out of a Group actor is posted to chat — a record of who moved what
-through the party stash, which is what settles "who took the healing potion?" without anyone
-having to remember. By default it goes to the **whole table**; **Receipt Settings** can send
-it to the transaction's participants and the DMs instead (see below).
-Receipts hook the document layer rather than the drag gesture, so everything is on the
-record: the module's own moves, forced Shift/Ctrl drags, GM stocking from the sidebar or
-a compendium, macros, and coin changes on the group sheet (as signed per-denomination
-deltas; a coin-dialog transfer instead names the member and what they moved, and notes
-when coin was converted to make change).
-
-One gesture reads as one receipt: a container arriving with its contents is a single
-line, and the two halves of a move pair up so the line names the member involved
-(*"Bob stashed 3 × Rations in Party Stash"*). When the counterparty isn't part of the
-gesture — a Ctrl-drag copy, sidebar stocking — the line is named after the acting user
-instead. Consumable stack merges show up as the quantity they added, not as a new item.
-
-One gesture reads as one receipt, and a deposit or withdrawal names the member and the
-direction (*"Gren Greenmantle deposited 12 gp into The Party"*) rather than a signed delta —
-hand edits and GM adjustments still read as adjustments, because that is what they are.
-
-## Settings
-
-**Game Settings → Configure Settings → Party Stash.**
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| Move items between party and members | on | Turn off to restore stock copy-on-drop everywhere. |
-| Post transfer receipts | on | Turn off for no ledger at all. |
-| Receipts | broadcast to the server | Who reads a receipt — see below. |
-| Deposit / withdraw coin window | on | Turn off to restore the stock currency row for everyone. |
-| Take button on the group inventory | on | Turn off to remove the Take column. The drag split prompt rides the item-transfer toggle instead. |
-| Stash button on member character sheets | on | Turn off to remove the Stash button from character sheets. |
-| Give button on member character sheets | on | Turn off to remove the Give button. With both on, Stash and Give share one column. |
-
-**Receipt Settings** is a choice of two, and Loot Shelf offers the same one, so a table can
-set one policy across both modules:
-
-- **Broadcast receipts to the server** *(default)* — every receipt is posted to the chat log
-  for the whole table to read.
-- **Receipts to the transaction participants and the DMs** — whispered to the player on the
-  other end of the transfer (whoever stashed, took, deposited or withdrew) and to the DMs.
-  **Assistant DMs count as DMs here** and see every receipt.
-
-The group actor itself is deliberately not counted when working out who to whisper to: the
-players own the party actor, so counting its owners would turn every whisper straight back
-into a broadcast.
-
-## Compatibility
-
-Requires the **dnd5e** system, 5.x or later (the module rides the drop-behavior seam the
-system introduced in 5.0). Foundry v13+ (verified on v14.368 with dnd5e 6.0.5, and earlier
-with dnd5e 6.0.3 and 5.3.3). If the seam ever moves, the module logs an error and leaves
-drops at stock behavior — it fails open, never destructive.
-
-dnd5e 6.0's own **Split Stack** context-menu entry appears on member sheets but not on the
-group sheet, and it splits a stack in place rather than moving it — so the Take and Stash
-buttons are still how part of a stack goes in or out of the stash.
+Sibling of [Loot Shelf](https://github.com/Txpple/fvtt-mod-lootshelf): Party Stash owns the shared
+party inventory, Loot Shelf owns loot on the ground and goods for sale. Neither needs the other.
 
 ## Installation
 
-Install via manifest URL:
+Paste the manifest URL into Foundry's *Install Module* dialog:
 
 ```
 https://github.com/Txpple/fvtt-mod-partystash/releases/latest/download/module.json
 ```
 
+Requires Foundry VTT v13 or v14 and the dnd5e system 5.x or 6.x (verified on dnd5e 6.0.5 /
+Foundry 14.368). No other dependencies.
+
+## Moving items
+
+Dragging a physical item between a Group actor and one of its own members moves it, in both
+directions, including a drop on a member's row inside the group sheet. The move needs the dragging
+user to own both actors. With only one side owned the drop is blocked and a warning explains why: a
+copy would land and the source delete would be refused, stranding a duplicate.
+
+dnd5e's own modifiers still apply: **Ctrl-drag** (or Alt) forces a copy, **Shift-drag** forces a
+move for any drag the system allows. Only the default for the stash case is changed; the system's
+own drop pipeline does the work, so consumable stacks merge and containers move with their
+contents.
+
+## Coin
+
+The group's currency row gets **Deposit** and **Withdraw** buttons. The dialog has one box per
+denomination, each capped at what the source can afford, and an **Everything** button. If you own
+more than one member, a picker chooses whose purse is involved.
+
+Coin the source holds loose moves as itself: two platinum arrive as two platinum. Coin it does not
+hold loose is made as change from the rest of the purse, the dialog says so before it happens, and
+the receipt records it. Only the source purse is re-composed; the destination receives exactly the
+denominations typed.
+
+## Take, Stash and Give
+
+Every move asks first. A stack asks **how many** (a drag defaults to the whole stack, a button to
+one); a single item or a container asks a plain confirmation, so a misclick never moves loot
+silently. Containers move whole, with their contents.
+
+- **Take**, on every row of the group inventory, moves the item to a member you own, with a picker
+  when you own more than one.
+- **Stash**, on every row of a member's character sheet, moves the item into the group's inventory.
+  The button only appears on characters that belong to a group.
+- **Give**, beside Stash, hands the item to another party member. The list offers the members whose
+  player is online (with a party picker above it if you belong to more than one group). If nobody
+  else is online, a notice says so.
+
+Give needs no GM. A player cannot write onto a partymate's sheet, so the item passes through the
+stash marked for the recipient's player, and that player's client moves it onto their character and
+clears the stash row. One receipt: *"Ann gave 2 × Antitoxin to Bob."* If the other player's client
+never answers, the item comes back to you after a few seconds with an error asking you to try again;
+nothing is left waiting in the stash, and whichever client clears the stash row owns the gift, so
+nothing is ever doubled. A member you own yourself receives the item directly. NPC members are not
+offered.
+
+The buttons sit at the far right of the row, past the system's controls, and stay visible as the
+sheet narrows; the system's own columns give way first. The group sheet drops the per-row equip
+toggle: nobody wields a sword out of the party's bag.
+
+## Receipts
+
+Every change to a group actor's loot posts a line to chat, under the alias *Party Stash*: the
+module's own moves, forced drags, GM stocking from the sidebar, macros and coin changes alike. One
+gesture reads as one receipt: a container with its contents is one line, the two halves of a move
+pair up (*"Bob stashed 3 × Rations in The Party"*), a deposit names the member and the amount
+(*"Gren deposited 12 gp into The Party"*). Hand edits and GM adjustments read as adjustments.
+
+**Receipt Settings** picks who reads them, and Loot Shelf offers the same choice:
+
+- **Broadcast to the server** (default): posted to the chat log for the whole table.
+- **Participants and the DMs**: whispered to the player on the other end of the transfer and to the
+  DMs. Assistant DMs count as DMs.
+
+## Settings
+
+*Game Settings → Configure Settings → Party Stash.* Everything is on by default.
+
+| Setting | What it does |
+| --- | --- |
+| Move items between party and members | Off restores stock copy-on-drop everywhere, and the split prompt with it. |
+| Post transfer receipts | Off means no ledger at all. |
+| Receipts | Broadcast, or participants and the DMs. |
+| Deposit / withdraw coin window | Off restores the stock currency row for everyone. |
+| Take button on the group inventory | Off removes the Take column. |
+| Stash button on member character sheets | Off removes the Stash button. |
+| Give button on member character sheets | Off removes the Give button. With both on, Stash and Give share one column. |
+
+## Repository layout
+
+```
+module.json                      the Foundry manifest
+scripts/partystash.js            the module, one file: drags, coin, stacks, give, receipts
+styles/partystash.css            the buttons, the dialogs and the column widths
+templates/                       the Take column and the Stash/Give column
+tools/
+  verify-partystash.mjs          the live suite: drags, buttons, a two-client Give
+  verify-partystash-coin.mjs     the live suite for the coin dialog and its receipts
+  shot-partystash-coin.mjs       screenshots of the coin dialog
+  audit-partystash-coin-cleanup.mjs, clean-stale-ownership.mjs
+                                 housekeeping for the sandbox after a crashed run
+prototypes/                      clickable mock-ups ruled on before a feature is built
+BACKLOG.md                       what is asked for and not built yet
+```
+
+## Development
+
+There is no build step: the module is one plain ES module loaded from `scripts/`.
+
+- The live suites run against the local sandbox with `FOUNDRY_HOST=local node
+  tools/verify-partystash.mjs` and `… verify-partystash-coin.mjs`. They create and clean up their
+  own fixture items and temp users, and use the house MCP repo (`fvtt-mcp-dnd5e`, a `file:` dev
+  dependency beside this one); run `npm install` once.
+- Releases: bump `version` and the `download` URL in `module.json` together, tag `vX.Y.Z`, and
+  publish a zip of `module.json`, `README.md`, `LICENSE`, `scripts/`, `styles/` and `templates/`
+  with the manifest as a GitHub release.
+
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
