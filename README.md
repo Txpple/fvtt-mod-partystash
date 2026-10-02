@@ -1,4 +1,4 @@
-# Party Stash
+# Open Roll 5e: Party Stash
 
 A Foundry VTT module for the dnd5e system that makes a Group actor's inventory a working party
 stash. Stock drag-and-drop between sheets *copies* an item, so stocking the stash left a duplicate
@@ -100,7 +100,7 @@ pair up (*"Bob stashed 3 × Rations in The Party"*), a deposit names the member 
 
 ## Settings
 
-*Game Settings → Configure Settings → Party Stash.* Everything is on by default.
+*Game Settings → Configure Settings → Open Roll 5e: Party Stash.* Everything is on by default.
 
 | Setting | What it does |
 | --- | --- |
