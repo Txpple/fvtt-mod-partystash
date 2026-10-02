@@ -87,7 +87,7 @@ Party Stash fixes that both ways:
 - **Beside Stash, a Give button** hands an item straight to another party member. Press it
   and pick who — the list offers the members whose player is **online** (if you belong to
   more than one party, a party picker sits above it) — with the same quantity prompt. If
-  nobody else is online, it says so instead of opening an empty list.
+  nobody else is online, a notice says so instead of an empty list.
 
 The buttons sit past the system's own row controls, at the far right edge (Stash and Give
 share one column), and the group sheet drops the per-row equip toggle — nobody wields a

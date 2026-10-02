@@ -43,6 +43,17 @@ function assert(cond, msg) {
   if (!cond) fails++;
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+/** Poll `fn` every `step` ms until it is truthy or `ms` have passed; returns the last value. */
+const waitFor = async (fn, ms, step = 500) => {
+  const until = Date.now() + ms;
+  let last;
+  while (Date.now() < until) {
+    last = await fn();
+    if (last) return last;
+    await sleep(step);
+  }
+  return last;
+};
 
 /**
  * One synthetic drag probe, fully inside the page. Single-arg evaluate (bridge rule).
@@ -190,12 +201,15 @@ const BUTTON_PROBE = async ({ actorId, itemId, button, partnerId, qty, settle = 
       dlg = document.querySelector('.partystash-dialog');
     }
     out.prompt = dlg?.querySelector('.window-title')?.textContent?.trim() ?? null;
+    out.text = dlg?.querySelector('.dialog-content')?.textContent?.trim() ?? null;
     if (dlg) {
       const select = dlg.querySelector('select[name="partner"]');
       if (select && partnerId) select.value = partnerId;
       const input = dlg.querySelector('input[name="qty"]');
       if (input && qty) input.value = String(qty);
-      dlg.querySelector('button[data-action="go"]')?.click();
+      // "go" is every transfer prompt's button; "ok" is the one-button notice (Give with
+      // nobody online, v1.7).
+      dlg.querySelector('button[data-action="go"], button[data-action="ok"]')?.click();
     }
     const until = Date.now() + settle;
     while (Date.now() < until) {
@@ -594,11 +608,38 @@ try {
   try {
     await fg.connect();
     await ft.connect();
-    // A fresh bridge page spends ~15s warming compendium indexes and drains no socket traffic
-    // until it is done; after that it still applies a broadcast 1.5–4s late (measured
-    // 2026-10-01). A live browser does this in milliseconds, so the waits below are the
-    // harness's, not the module's.
-    await sleep(16000);
+    // A fresh bridge page spends a while (15s and more, it varies) warming compendium indexes
+    // and drains no socket traffic until it is done; after that it still applies a broadcast
+    // 1.5–4s late (measured 2026-10-01). A live browser does this in milliseconds, so the
+    // waiting here is the harness's, not the module's — and it waits for PROOF rather than a
+    // fixed time: a canary item the GM drops in the group, pressed on only once the taker's
+    // page has seen it arrive.
+    const CANARY = `${TAG} Canary`;
+    await f.evaluate(
+      async ({ groupId, canary }) =>
+        game.actors.get(groupId).createEmbeddedDocuments('Item', [{ name: canary, type: 'loot' }]),
+      { groupId: setup.groupId, canary: CANARY }
+    );
+    const warm = Date.now();
+    const takerLive = await waitFor(
+      () =>
+        ft.evaluate(
+          ({ groupId, canary }) => game.actors.get(groupId)?.items.some(i => i.name === canary),
+          { groupId: setup.groupId, canary: CANARY }
+        ),
+      90000,
+      1000
+    );
+    console.log(
+      `  [taker] ${takerLive ? 'applying broadcasts' : 'NEVER saw the canary'} after ${Math.round((Date.now() - warm) / 1000)}s`
+    );
+    await f.evaluate(
+      async ({ groupId, canary }) => {
+        const g = game.actors.get(groupId);
+        await g.deleteEmbeddedDocuments('Item', g.items.filter(i => i.name === canary).map(i => i.id));
+      },
+      { groupId: setup.groupId, canary: CANARY }
+    );
     const who = await fg.evaluate(
       ({ aId, bId, takerId }) => ({
         ownsA: game.actors.get(aId)?.isOwner ?? null,
@@ -618,9 +659,11 @@ try {
       button: 'partystash-give-button',
       partnerId: setup.bId,
       qty: 2,
-      settle: 6000,
+      settle: 8000,
     });
-    await sleep(1000);
+    // The taker's claim lands when its page gets to it; read once the stash row is gone.
+    await waitFor(async () => (await f.evaluate(TAGGED, iArgs)).group.length === 0, 6000, 500);
+    await sleep(1500); // and let the receipt and the taker's delete settle
     iAfter1 = await f.evaluate(TAGGED, iArgs);
 
     // I2: the taker's client can't credit — the giver takes the gift back (GIVE_WAIT = 8s)
@@ -641,7 +684,7 @@ try {
     await sleep(1000);
     iAfter2 = await f.evaluate(TAGGED, iArgs);
 
-    // I3: nobody online — no prompt, a warning
+    // I3: nobody online — a one-button notice in place of the prompt
     await ft.dispose();
     await sleep(3000);
     I3 = await fg.evaluate(BUTTON_PROBE, {
@@ -691,10 +734,10 @@ try {
   );
 
   if (I3.error) console.log('  probe error:', I3.error);
-  assert(I3.prompt === null, `no prompt with nobody online (got "${I3.prompt}")`);
+  assert(I3.prompt === `Give ${TAG}`, `the notice opens as a dialog (got "${I3.prompt}")`);
   assert(
-    (I3.notifications ?? []).some(n => /no party members to give to/.test(n)),
-    `giver told nobody is online (${(I3.notifications ?? []).join(' | ')})`
+    /No party members to give/.test(I3.text ?? '') && !/Quantity/.test(I3.text ?? ''),
+    `the dialog says nobody is online, with no picker or quantity (got "${I3.text}")`
   );
 
   // temp users and grants out again

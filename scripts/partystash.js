@@ -1607,16 +1607,25 @@ async function giveDialog(actor, item) {
     return void ui.notifications.warn(
       `Party Stash: you don't own ${actor.name}, so you can't give their things away.`);
   }
+  const esc = Handlebars.escapeExpression;
   const options = giveOptions(actor);
   if (!options.length) {
+    // A dialog, not a toast — the same window every other Party Stash gesture opens (the
+    // user's call, 2026-10-01), so "nobody to give to" reads as the answer to the press.
     const groups = game.actors.filter(g =>
       g.type === "group" && g.system?.members?.some?.(m => m.actor === actor));
-    const where = groups.length === 1 ? groups[0].name : "the party";
-    return void ui.notifications.warn(
-      `Party Stash: no party members to give to — nobody else in ${where} is online right now.`);
+    const where = groups.length === 1 ? `<strong>${esc(groups[0].name)}</strong>` : "the party";
+    return void foundry.applications.api.DialogV2.wait({
+      classes: ["partystash-dialog"],
+      window: { title: `Give ${item.name}`, icon: "fa-solid fa-people-arrows" },
+      position: { width: 360 },
+      content: `<p>No party members to give <strong>${esc(item.name)}</strong> to: nobody else in `
+        + `${where} is online right now.</p>`,
+      buttons: [{ action: "ok", label: "OK", default: true }],
+      rejectClose: false
+    });
   }
 
-  const esc = Handlebars.escapeExpression;
   const max = stackCount(item);
   const container = item.type === "container";
   const askQty = !container && max > 1;

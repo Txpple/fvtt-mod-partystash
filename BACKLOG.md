@@ -34,9 +34,9 @@ into one gesture, and the recipient's client does the second half by itself.
    character and the player: "Bob (Sam)". A stack also gets the quantity prompt. When the
    giver belongs to **more than one group**, a group picker sits above the "To" picker and
    the recipient list follows it; with one group the picker is not shown and that group is
-   used (the user, 2026-10-01). When the list is empty, a warning toast says so instead of
-   an empty picker: "no party members to give to — nobody else in The Party is online right
-   now."
+   used (the user, 2026-10-01). When the list is empty, a one-button dialog says so instead
+   of an empty picker: "No party members to give Antitoxin to: nobody else in The Party is
+   online right now."
 2. **The giver's half.** The giver's client puts the chosen quantity in the group as **its
    own row, never merged** into an existing stack. It marks the row with a flag,
    `flags.fvtt-mod-partystash.giveTo = { actor, user, from }`. Then it reduces or deletes
@@ -86,7 +86,7 @@ on its next login. It's the one leftover case, and a corner of a corner.
   (~160px, in place of the 84px Stash column). The column header reads "Party Stash".
 - **NPC members are left out.** A hireling or a mount has no player, so the hand-off can't
   reach it. A later version may list them while a GM is online.
-- **Nobody online** is a warning toast, the module's voice for every other refusal.
+- **Nobody online** is a one-button dialog, the same window every other gesture opens (re-ruled from a toast, 2026-10-01).
 - **Nothing shows while waiting.** The normal case is under a second; the stall has its
   own error.
 - **The icon** is `fa-people-arrows`.
