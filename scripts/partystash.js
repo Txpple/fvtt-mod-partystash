@@ -293,6 +293,12 @@ Hooks.once("setup", () => {
   // them past the system's controls column (order 1000) — the FURTHEST RIGHT cell, the
   // owner's call on 2026-08-26. The matching width rules in partystash.css are REQUIRED —
   // a column id without CSS collapses to zero width (Loot Shelf handoff, landmine #2).
+  //
+  // PRIORITY 1000, the same as the system's controls: dnd5e's inventory hides columns from
+  // the LOWEST priority up as the sheet narrows (Price is 300, Weight 400, Quantity 500),
+  // and at 100 ours was the first to vanish — on a sheet at its stock width a player never
+  // saw the buttons existed (found live 2026-10-01). The buttons are the point of the row;
+  // the system's own columns give way first.
   const injectColumn = (Cls, setting, id, template, gate) => {
     if (!Cls) return;
     const origSections = Cls.prototype._configureInventorySections;
@@ -301,7 +307,7 @@ Hooks.once("setup", () => {
       try {
         if (!game.settings.get(MODULE_ID, setting)) return;
         if (gate && !gate(this)) return;
-        const column = { id, width: 84, order: 1100, priority: 100, label: "", template };
+        const column = { id, width: 84, order: 1100, priority: 1000, label: "", template };
         for (const s of sections) if (Array.isArray(s.columns)) s.columns = [...s.columns, column];
       } catch (err) {
         console.error(`${MODULE_ID} | adding the ${id} column failed`, err);
@@ -328,7 +334,7 @@ Hooks.once("setup", () => {
         if (!(stash || give) || !isGroupMember(this.actor)) return;
         const id = stash && give ? "partystashPair" : stash ? "partystashStash" : "partystashGive";
         const column = {
-          id, width: stash && give ? 160 : 84, order: 1100, priority: 100, label: "",
+          id, width: stash && give ? 160 : 84, order: 1100, priority: 1000, label: "",
           template: `modules/${MODULE_ID}/templates/stash-column.hbs`, stash, give
         };
         for (const s of sections) if (Array.isArray(s.columns)) s.columns = [...s.columns, column];
