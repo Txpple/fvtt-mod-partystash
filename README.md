@@ -21,8 +21,9 @@ splits stacks, hands items between members, and posts a receipt for every transf
 - **The destination is credited before the source is debited**, everywhere. A failure leaves a
   duplicate, never a loss, and the receipt shows it.
 
-Sibling of [Loot Shelf](https://github.com/Txpple/fvtt-mod-lootshelf): Party Stash owns the shared
-party inventory, Loot Shelf owns loot on the ground and goods for sale. Neither needs the other.
+Its companion is [Open Roll 5e: Loot Shelf](https://github.com/Txpple/fvtt-mod-lootshelf): Party
+Stash owns the shared party inventory, Loot Shelf owns loot on the ground and goods for sale.
+Neither needs the other.
 
 ## Installation
 
@@ -141,10 +142,12 @@ There is no build step: the module is one plain ES module loaded from `scripts/`
   publish a zip of `module.json`, `README.md`, `LICENSE`, `scripts/`, `styles/` and `templates/`
   with the manifest as a GitHub release.
 
-## Sister modules
+<!-- openroll5e:family -->
+## Part of Open Roll 5e
 
-Party Stash is one of the Open Roll 5e modules for Foundry VTT. Each installs and works on its own and
-none needs another; together they cover the table from the fog of war to the loot. The rest of the family:
+Party Stash is one of the Open Roll 5e modules for Foundry VTT, a suite built for one D&D 5e table and
+shared. Each module installs and works on its own and none needs another; together they cover the
+table from the fog of war to the loot. The other modules:
 
 - [Open Roll 5e: Autoexplore](https://github.com/Txpple/fvtt-mod-autoexplore): lets a scene start fully explored, so the whole map shows through the fog of war while tokens still need line of sight.
 - [Open Roll 5e: Battle Flow](https://github.com/Txpple/fvtt-mod-battleflow): combat automation for dnd5e 2024 rules: a hit rolls and applies its own damage, saves resolve themselves, reactions hold, and concentration is tracked. Every rule that touches a fight in the 2024 core books, Heroes of Faerûn, Arcana Unleashed and Ravenloft: The Horrors Within.
@@ -154,6 +157,15 @@ none needs another; together they cover the table from the fog of war to the loo
 - [Open Roll 5e: Loot Shelf](https://github.com/Txpple/fvtt-mod-lootshelf): loot chests and merchant shelves that players can take from, buy from and sell to without owning them, with a receipt for every trade.
 - [Open Roll 5e: Open Server](https://github.com/Txpple/fvtt-mod-openserver): for hosted worlds: clears the startup pause so players can play before the GM arrives, and gives any user a landing scene of their own.
 - [Open Roll 5e: Soundscape](https://github.com/Txpple/fvtt-mod-soundscape): background sound for scenes: random one-shots with silence between them, seamless crossfaded loops, day and night gating, and quiet during combat.
+
+Three MCP servers for [Claude Code](https://claude.com/claude-code) complete the suite:
+
+- [fvtt-mcp-dnd5e](https://github.com/Txpple/fvtt-mcp-dnd5e): builds D&D 5e content in a live Foundry world from Claude Code: a stat block becomes a complete NPC, a map image a walled and lit scene, an adventure its journals, tables and handouts.
+- [fvtt-mcp-imagegen](https://github.com/Txpple/fvtt-mcp-imagegen): makes the art with Google's Gemini image models: icons, tokens, props, portraits, illustrations and battlemap restyles, grounded in what the world already shows.
+- [fvtt-mcp-sessionscribe](https://github.com/Txpple/fvtt-mcp-sessionscribe): turns a session's Discord recording and Foundry chat log into its record: a speaker-labelled transcript, a player recap, a combat report and GM notes.
+
+How they fit together is mapped in [fvtt-suite-openroll5e](https://github.com/Txpple/fvtt-suite-openroll5e).
+<!-- /openroll5e:family -->
 
 ## License
 
