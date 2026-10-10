@@ -33,8 +33,8 @@ Paste the manifest URL into Foundry's *Install Module* dialog:
 https://github.com/Txpple/fvtt-mod-partystash/releases/latest/download/module.json
 ```
 
-Requires Foundry VTT v13 or v14 and the dnd5e system 5.x or 6.x (verified on dnd5e 6.0.5 /
-Foundry 14.368). No other dependencies.
+Requires Foundry VTT v13 or v14 and the dnd5e system 5.x or 6.x (verified on dnd5e 6.0.6 /
+Foundry 14.369). No other dependencies.
 
 ## Moving items
 
