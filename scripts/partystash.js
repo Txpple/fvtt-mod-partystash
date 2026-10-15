@@ -178,8 +178,10 @@ Hooks.once("init", () => {
     default: true
   });
 
-  // What the Revert button on a receipt does, for macros and the live checks (GM only).
+  // What the Revert button on a receipt does (GM only), and whether this client is the one that
+  // acts (the active GM in its leading window), for macros and the live checks.
   game.modules.get(MODULE_ID).api = {
+    isElect: () => elect.isElect(),
     revertReceipt: (message, line = 0) =>
       receipts.requestRevert(typeof message === "string" ? game.messages.get(message) : message, line)
   };
@@ -378,10 +380,11 @@ Hooks.once("setup", () => {
  *
  * Each line carries its `moves`, as `flushReceipts`, the currency hook and the gift record
  * them and `revertLine` reads them back:
- *   { kind: "item", from, to, item, qty, name, type, img }
+ *   { kind: "item", from, to, item, qty, name, type, img, source? }
  *       `qty` of the goods went from actor `from` (null: from outside the party's books, a
  *       GM stocking the stash) to actor `to` (null: out of them), where they are the item
- *       `item`; with `to` null, `item` is the stack on `from` that shrank.
+ *       `item`; with `to` null, `item` is the stack on `from` that shrank. `source` is the
+ *       item on `from` they left, which a revert grows back while it is still there.
  *   { kind: "coin", actor, delta }
  *       actor `actor`'s purse changed by `delta`, signed per denomination.
  * A GM reverts a line with one click; the elect carries it out (the kit's receipt.js).
@@ -473,9 +476,9 @@ function recordReceipt(item, dir, amount, fromStack = false, userId = game.user.
 }
 
 /** One item move of a receipt line (see the receipts header for the shape). */
-const itemMove = (from, to, event, qty) => ({
+const itemMove = (from, to, event, qty, source = null) => ({
   kind: "item", from: from?.uuid ?? null, to: to?.uuid ?? null, item: event.id, qty,
-  name: event.name, type: event.type, img: event.img
+  name: event.name, type: event.type, img: event.img, ...(source ? { source } : {})
 });
 
 function flushReceipts() {
@@ -513,7 +516,7 @@ function flushReceipts() {
       if (g.dir === "gain") {
         lines.push(pair
           ? { html: html`<strong>${pair.actor.name}</strong> stashed ` + `${label} in ${group}.`,
-            moves: [itemMove(pair.actor, g.actor, g, g.amount)] }
+            moves: [itemMove(pair.actor, g.actor, g, g.amount, pair.id)] }
           : { html: html`<strong>${actingName(g.userId)}</strong> added ` + `${label} to ${group}.`,
             moves: [itemMove(null, g.actor, g, g.amount)] });
       } else {
@@ -521,7 +524,7 @@ function flushReceipts() {
         // take its amount back; an item deleted outright is recorded, not revertible.
         lines.push(pair
           ? { html: html`<strong>${pair.actor.name}</strong> took ` + `${label} from ${group}.`,
-            moves: [itemMove(g.actor, pair.actor, pair, g.amount)] }
+            moves: [itemMove(g.actor, pair.actor, pair, g.amount, g.id)] }
           : { html: html`<strong>${actingName(g.userId)}</strong> removed ` + `${label} from ${group}.`,
             moves: [itemMove(g.actor, null, g, g.amount)], revertible: g.fromStack });
       }
@@ -1734,7 +1737,7 @@ async function giveDialog(actor, item) {
       const facts = { name: item.name, type: item.type, img: item.img };
       const { moved, item: landed } = await moveStack(item, choice.actor, qty);
       ui.notifications.info(`Gave ${moved} × ${item.name} to ${choice.actor.name}.`);
-      postGiveReceipt(actor, choice.actor, facts, moved, container, landed);
+      postGiveReceipt(actor, choice.actor, facts, moved, container, landed, item.id);
       return;
     }
     await handOff(actor, item, option.group, choice, qty);
@@ -1748,10 +1751,13 @@ async function giveDialog(actor, item) {
  * The one receipt a gift posts, by whichever client finished the move. `facts` is the gift's
  * name, type and img; `landed` the item it became on the recipient (what a revert takes back).
  */
-function postGiveReceipt(from, to, facts, amount, cargo, landed) {
+function postGiveReceipt(from, to, facts, amount, cargo, landed, source = null) {
   if (!receiptsEnabled()) return;
   const label = html`${amount} × <em>${facts.name}</em>${cargo ? " (and its contents)" : ""}`;
-  const move = { kind: "item", from: from?.uuid ?? null, to: to.uuid, item: landed?.id ?? null, qty: amount, ...facts };
+  const move = {
+    kind: "item", from: from?.uuid ?? null, to: to.uuid, item: landed?.id ?? null, qty: amount, ...facts,
+    ...(source ? { source } : {})
+  };
   postReceipt([{
     html: html`<strong>${from?.name ?? "Someone"}</strong> gave ` + `${label} to ` + html`<strong>${to.name}</strong>.`,
     moves: [move],
@@ -1769,7 +1775,7 @@ async function handOff(actor, item, group, { actor: to, user }, n) {
   const max = stackCount(item);
   n = Math.min(max, Math.max(1, Math.floor(Number(n) || 1)));
   const container = item.type === "container";
-  const mark = { actor: to.id, user: user.id, from: actor.id, fromUser: game.user.id, at: Date.now() };
+  const mark = { actor: to.id, user: user.id, from: actor.id, fromUser: game.user.id, fromItem: item.id, at: Date.now() };
   const name = item.name;
 
   let row;
@@ -1868,7 +1874,7 @@ async function finishGive(row, mark) {
     const { moved, item: landed } = await claimRow(row, to);
     if (!moved) return;
     ui.notifications.info(`${from?.name ?? "Someone"} gave ${to.name} ${moved} × ${name}.`);
-    postGiveReceipt(from, to, facts, moved, cargo, landed);
+    postGiveReceipt(from, to, facts, moved, cargo, landed, mark.fromItem ?? null);
   } catch (err) {
     log.error(`finishing a gift failed`, err);
   }
@@ -1936,6 +1942,20 @@ function goodsOf(actor, move) {
 }
 
 /**
+ * One move's goods back on `from`: onto the stack they left when it is still there (so a split
+ * stash comes back as the one stack it was), else through the same moveStack every Take and
+ * Stash uses. Credit before debit either way.
+ */
+async function giveBack({ m, goods, from }, options) {
+  const back = m.source ? from.items.get(m.source) : null;
+  if (back && back.name === m.name && back.type !== "container" && goods.type !== "container") {
+    await back.update({ "system.quantity": stackCount(back) + m.qty }, options);
+    return takeAway(goods, m.qty, options);
+  }
+  return moveStack(goods, from, m.qty, { options });
+}
+
+/**
  * Reverse one receipt line, on the elect (the kit's receipt.js calls it with the echo-marked
  * `options`, so these writes post no receipt of their own). Everything is checked before the
  * first write: the goods still where the move left them, in the quantity it moved; every
@@ -1988,7 +2008,7 @@ async function revertLine(line, { options = {} } = {}) {
     for (const it of items) {
       wrote = true;
       if (it.grow) await it.goods.update({ "system.quantity": stackCount(it.goods) + it.m.qty }, options);
-      else if (it.from) await moveStack(it.goods, it.from, it.m.qty, { options });
+      else if (it.from) await giveBack(it, options);
       else await takeAway(it.goods, it.m.qty, options);
     }
     for (const p of purses.filter(x => gain(x) < 0)) {
