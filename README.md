@@ -139,6 +139,7 @@ tests/                           the unit tests (Vitest): the kit, the coin arit
 tools/
   verify-partystash.mjs          the live suite: drags, buttons, a two-client Give
   verify-partystash-coin.mjs     the live suite for the coin dialog and its receipts
+  live-check.mjs                 the live check of a receipt and its revert
   shot-partystash-coin.mjs       screenshots of the coin dialog
   audit-partystash-coin-cleanup.mjs, clean-stale-ownership.mjs
                                  housekeeping for the sandbox after a crashed run
