@@ -1,0 +1,22 @@
+# The release: a pushed version tag builds the zip and publishes it, through the family's reusable
+# workflow (fvtt-suite-openroll5e, .github/workflows/release-module.yml). The tag must be annotated,
+# name module.json's version and sit on main; its subject is the release title and its body the
+# notes. The module's gate runs first when package.json has a verify script. The release carries
+# the zip and a bare module.json, so the manifest URL (releases/latest/download/module.json) and
+# the download (releases/download/v<version>/<repo>.zip) both resolve.
+#
+# Run by hand (workflow_dispatch) it is the dry run: the same checks and the same build, the zip
+# kept as a workflow artifact, nothing published.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: Txpple/fvtt-suite-openroll5e/.github/workflows/release-module.yml@main

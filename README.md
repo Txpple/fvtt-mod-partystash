@@ -156,9 +156,12 @@ line)` does what the Revert button does (GM only).
   tools/verify-partystash.mjs` and `… verify-partystash-coin.mjs`. They create and clean up their
   own fixture items and temp users, and use the house MCP repo (`fvtt-mcp-dnd5e`, a `file:` dev
   dependency beside this one); run `npm install` once.
-- Releases: bump `version` and the `download` URL in `module.json` together, tag `vX.Y.Z`, and
-  publish a zip of `module.json`, `README.md`, `LICENSE`, `scripts/`, `styles/` and `templates/`
-  with the manifest as a GitHub release.
+- Releases: bump `version` and the `download` URL in `module.json` together and commit, then
+  push an annotated tag `vX.Y.Z` on `main` whose subject is the release title and whose body is the
+  notes. `.github/workflows/release.yml` hands it to the family's reusable release workflow (in
+  fvtt-suite-openroll5e), which checks the tag, runs `npm run verify`, builds the zip of
+  `module.json` and the served folders, reads it back, and publishes it with a bare `module.json`.
+  Run the workflow by hand for a dry run: the same checks and build, the zip kept as an artifact.
 
 <!-- openroll5e:family -->
 ## Part of Open Roll 5e
