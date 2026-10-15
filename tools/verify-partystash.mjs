@@ -447,7 +447,7 @@ try {
   const eSetup = await f.evaluate(
     async ({ tag, bId, groupId, userName }) => {
       const member = game.actors.get(bId);
-      let user =
+      const user =
         game.users.find(u => u.name === userName) ??
         (await User.implementation.create({ name: userName, role: CONST.USER_ROLES.PLAYER }));
       await member.update({ [`ownership.${user.id}`]: CONST.DOCUMENT_OWNERSHIP_LEVELS.OBSERVER });

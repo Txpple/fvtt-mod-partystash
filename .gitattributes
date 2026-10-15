@@ -1,0 +1,11 @@
+# LF in the repo and in every checkout, so a zip built here holds the same bytes as one built on CI.
+* text=auto eol=lf
+
+# Binary: never touch these.
+*.zip   binary
+*.webp  binary
+*.png   binary
+*.jpg   binary
+*.ogg   binary
+*.mp3   binary
+*.woff2 binary

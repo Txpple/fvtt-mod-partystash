@@ -1,0 +1,104 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "**",
+      "!dist",
+      "!node_modules",
+      "!package-lock.json",
+      "!prototypes",
+      "!module.json"
+    ]
+  },
+  "assist": { "enabled": false },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "none",
+      "arrowParentheses": "asNeeded",
+      "bracketSpacing": true
+    },
+    "globals": [
+      "game",
+      "ui",
+      "canvas",
+      "Hooks",
+      "CONFIG",
+      "CONST",
+      "foundry",
+      "dnd5e",
+      "Actor",
+      "Item",
+      "ActiveEffect",
+      "ChatMessage",
+      "Combat",
+      "Combatant",
+      "Token",
+      "TokenDocument",
+      "Scene",
+      "Folder",
+      "MeasuredTemplate",
+      "Roll",
+      "Dialog",
+      "PIXI",
+      "SearchFilter",
+      "fromUuid",
+      "fromUuidSync",
+      "renderTemplate",
+      "getDocumentClass",
+      "loadTemplates",
+      "Handlebars",
+      "libWrapper",
+      "User"
+    ]
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noConsole": { "level": "warn", "options": { "allow": ["warn", "error"] } },
+        "noExplicitAny": "off",
+        "noAssignInExpressions": "warn",
+        "useIterableCallbackReturn": "warn"
+      },
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUndeclaredVariables": "error",
+        "noUnusedVariables": "warn",
+        "noUnusedFunctionParameters": "warn"
+      },
+      "nursery": { "noFloatingPromises": "error" },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useImportType": "off",
+        "useTemplate": "off"
+      },
+      "complexity": { "useOptionalChain": "warn", "noThisInStatic": "off" }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["scripts/**", "tools/**"],
+      "formatter": { "enabled": false }
+    },
+    {
+      "includes": ["tools/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noConsole": "off", "noAssignInExpressions": "off" },
+          "nursery": { "noFloatingPromises": "off" }
+        }
+      }
+    }
+  ]
+}

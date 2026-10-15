@@ -577,7 +577,7 @@ function postReceipt(lines, userId, participants = []) {
   }).catch(err => console.error(`${MODULE_ID} | receipt message failed`, err));
 }
 
-Hooks.on("createItem", (item, options, userId) => {
+Hooks.on("createItem", (item, _options, userId) => {
   try {
     if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
     if (!item.system?.schema?.fields?.quantity) return; // physical items only
@@ -588,7 +588,7 @@ Hooks.on("createItem", (item, options, userId) => {
   }
 });
 
-Hooks.on("deleteItem", (item, options, userId) => {
+Hooks.on("deleteItem", (item, _options, userId) => {
   try {
     if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
     if (!item.system?.schema?.fields?.quantity) return;
@@ -604,7 +604,7 @@ Hooks.on("deleteItem", (item, options, userId) => {
 
 // Quantity deltas need the before value, which only preUpdate can see; it rides across
 // on `options` (preUpdate fires initiator-side only, and only that client posts).
-Hooks.on("preUpdateItem", (item, changes, options, userId) => {
+Hooks.on("preUpdateItem", (item, changes, options, _userId) => {
   try {
     if (changes.system?.quantity === undefined || !receiptsEnabled()) return;
     if (!item.system?.schema?.fields?.quantity) return;
@@ -614,7 +614,7 @@ Hooks.on("preUpdateItem", (item, changes, options, userId) => {
   }
 });
 
-Hooks.on("updateItem", (item, changes, options, userId) => {
+Hooks.on("updateItem", (item, _changes, options, userId) => {
   try {
     if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
     const before = foundry.utils.getProperty(options, `${MODULE_ID}.quantity`);
@@ -627,7 +627,7 @@ Hooks.on("updateItem", (item, changes, options, userId) => {
   }
 });
 
-Hooks.on("preUpdateActor", (actor, changes, options, userId) => {
+Hooks.on("preUpdateActor", (actor, changes, options, _userId) => {
   try {
     if (actor.type !== "group" || actor.pack) return;
     if (changes.system?.currency === undefined || !receiptsEnabled()) return;
@@ -637,7 +637,7 @@ Hooks.on("preUpdateActor", (actor, changes, options, userId) => {
   }
 });
 
-Hooks.on("updateActor", (actor, changes, options, userId) => {
+Hooks.on("updateActor", (actor, _changes, options, userId) => {
   try {
     if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
     // Only a group actor's purse is stash traffic. The before-image below is written by
@@ -701,7 +701,7 @@ Hooks.on("updateActor", (actor, changes, options, userId) => {
  * toggle live (a disabled field is skipped by form submission, so it simply keeps its stored
  * value — the same greying rule fvtt-mod-combatplus uses for its dependent settings).
  */
-Hooks.on("renderSettingsConfig", (app, element) => {
+Hooks.on("renderSettingsConfig", (_app, element) => {
   try {
     const el = element instanceof HTMLElement ? element : element?.[0];
     const select = el?.querySelector(`select[name="${MODULE_ID}.receiptVisibility"]`);
@@ -1011,7 +1011,7 @@ async function coinDialog(group, dir) {
         label: deposit ? "Deposit" : "Withdraw",
         icon: "fa-solid fa-coins",
         default: true,
-        callback: (ev, button) => {
+        callback: (_ev, button) => {
           const form = button.form;
           const amounts = {};
           for (const d of DENOMS) amounts[d] = Math.max(0, Math.floor(form.elements[d]?.valueAsNumber || 0));
@@ -1030,7 +1030,7 @@ async function coinDialog(group, dir) {
     // `dialog.element`, a <dialog> wrapping the form. Everything below is cosmetic guard-rails
     // regardless: `moveCoin` re-clamps against the live purse, so even if this whole callback
     // fails the transfer itself stays correct and merely loses its live caps.
-    render: (event, dialog) => {
+    render: (_event, dialog) => {
       try {
         const root = dialog?.element ?? dialog;
         const form = root.querySelector("form") ?? root;
@@ -1322,7 +1322,7 @@ async function maybeSplitMove(sheet, event, item) {
     buttons: [
       {
         action: "go", label: verb, icon: "fa-solid fa-hand-holding", default: true,
-        callback: (ev, button) =>
+        callback: (_ev, button) =>
           Math.max(1, Math.min(max, Math.floor(button.form?.elements?.qty?.valueAsNumber || max)))
       },
       { action: "cancel", label: "Cancel" }
@@ -1370,7 +1370,7 @@ async function buttonPrompt({ title, verb, icon, question, item, partners, partn
     buttons: [
       {
         action: "go", label: verb, icon, default: true,
-        callback: (ev, button) => ({
+        callback: (_ev, button) => ({
           partnerId: button.form?.elements?.partner?.value,
           qty: Math.max(1, Math.min(max, Math.floor(button.form?.elements?.qty?.valueAsNumber || 1)))
         })
@@ -1483,11 +1483,11 @@ Hooks.on("renderCharacterActorSheet", (app, element) => {
   const root = element instanceof HTMLElement ? element : app.element;
   wireButtons(root, "partystash-stash-button", itemId => {
     const item = actor.items.get(itemId);
-    if (item) stashDialog(actor, item);
+    if (item) void stashDialog(actor, item);
   }, "stash");
   wireButtons(root, "partystash-give-button", itemId => {
     const item = actor.items.get(itemId);
-    if (item) giveDialog(actor, item);
+    if (item) void giveDialog(actor, item);
   }, "give");
 });
 
@@ -1666,7 +1666,7 @@ async function giveDialog(actor, item) {
     buttons: [
       {
         action: "go", label: "Give", icon: "fa-solid fa-people-arrows", default: true,
-        callback: (ev, button) => ({
+        callback: (_ev, button) => ({
           groupId: button.form?.elements?.group?.value,
           partnerId: button.form?.elements?.partner?.value,
           qty: Math.max(1, Math.min(max, Math.floor(button.form?.elements?.qty?.valueAsNumber || 1)))
@@ -1676,12 +1676,12 @@ async function giveDialog(actor, item) {
     ],
     rejectClose: false,
     // The recipients follow the party picker (see coinDialog for the render-callback shape).
-    render: (event, dialog) => {
+    render: (_event, dialog) => {
       try {
         const form = (dialog?.element ?? dialog).querySelector("form");
         const groupSelect = form?.elements?.group;
         const partnerSelect = form?.elements?.partner;
-        if (!groupSelect || groupSelect.type !== "select-one" || !partnerSelect) return;
+        if (groupSelect?.type !== "select-one" || !partnerSelect) return;
         groupSelect.addEventListener("change", () => {
           const o = options.find(x => x.group.id === groupSelect.value) ?? options[0];
           partnerSelect.innerHTML = toOptions(o);
@@ -1777,7 +1777,6 @@ async function handOff(actor, item, group, { actor: to, user }, n) {
  * there first, and this client undoes its own credit. Returns how many moved, 0 when lost.
  */
 async function claimRow(row, dest) {
-  const group = row.parent;
   const n = stackCount(row);
   const container = row.type === "container";
   quiet.add(row.id);
@@ -1832,7 +1831,7 @@ async function finishGive(row, mark) {
 }
 
 /** The recipient's trigger: a marked row arriving in a group, addressed to this user. */
-Hooks.on("createItem", (item, options, userId) => {
+Hooks.on("createItem", (item, _options, _userId) => {
   try {
     const mark = item.getFlag?.(MODULE_ID, "giveTo");
     if (!mark || item.parent?.type !== "group" || mark.user !== game.user.id) return;
@@ -1929,7 +1928,7 @@ Hooks.on("renderGroupActorSheet", (app, element) => {
 
   wireButtons(root, "partystash-take-button", itemId => {
     const item = group.items.get(itemId);
-    if (item) takeDialog(group, item);
+    if (item) void takeDialog(group, item);
   }, "take");
 
   try {
@@ -1963,7 +1962,7 @@ Hooks.on("renderGroupActorSheet", (app, element) => {
       button.addEventListener("click", ev => {
         ev.preventDefault();
         ev.stopPropagation();
-        coinDialog(group, dir);
+        void coinDialog(group, dir);
       });
       wrap.append(button);
     }

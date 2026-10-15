@@ -19,7 +19,6 @@ const env = loadEnv();
 const OUT = join(__dirname, '..', 'scratch', 'partystash-coin');
 mkdirSync(OUT, { recursive: true });
 const TEMP_USER = 'ZZ-PSTASH Shot Player';
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const mkFoundry = (user, password) =>
   new Foundry(user ? { ...foundryConfig(env), user, password: password ?? '' } : foundryConfig(env));
@@ -123,7 +122,7 @@ async function shoot(f, label, groupId) {
   return { ...info, dialogText: withDialog.dialogText };
 }
 
-let f = mkFoundry();
+const f = mkFoundry();
 const report = {};
 try {
   await f.connect();

@@ -2,13 +2,25 @@
   "name": "fvtt-mod-partystash",
   "private": true,
   "type": "module",
-  "description": "Development tooling for Party Stash. NOTHING HERE SHIPS — the module is plain ES modules loaded straight from scripts/, with no build step; this file declares what tools/ imports.",
+  "description": "Development tooling for Party Stash. NOTHING HERE SHIPS: the module is plain ES modules loaded straight from scripts/, with no build step. This file declares the gate (Biome and the unit tests) and what tools/ imports.",
+  "scripts": {
+    "verify": "npm run check && npm run test",
+    "check": "biome check --error-on-warnings .",
+    "check:fix": "biome check --write .",
+    "test": "vitest run"
+  },
   "devDependencies": {
-    "fvtt-mcp-dnd5e": "file:../fvtt-mcp-dnd5e"
+    "@biomejs/biome": "^2.5.0",
+    "fvtt-mcp-dnd5e": "file:../fvtt-mcp-dnd5e",
+    "vitest": "~3.2.6"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "author": "Txpple",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Txpple/fvtt-mod-partystash.git"
+  }
 }

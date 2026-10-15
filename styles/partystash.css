@@ -51,7 +51,9 @@
   border: 1px solid var(--dnd5e-color-gold, #9f9275);
   border-radius: 3px;
   cursor: pointer;
-  transition: background-color 150ms ease, border-color 150ms ease;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
 }
 
 .dnd5e2.actor.group section.currency .partystash-coin-button:hover {

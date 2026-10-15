@@ -190,7 +190,7 @@ const MOVE = async ({ groupId, partnerId, dir, amounts }) => {
   }
 };
 
-let f = mkFoundry();
+const f = mkFoundry();
 let snapshot = null;
 try {
   console.log('[coin] connecting…');
