@@ -1242,8 +1242,8 @@ async function moveStack(item, target, n, { options = {} } = {}) {
 async function takeAway(item, n, options = {}) {
   if (item.type === "container") return item.delete({ ...options, deleteContents: true });
   const max = stackCount(item);
-  if (n >= max) return item.delete(options);
-  return item.update({ "system.quantity": max - n }, options);
+  if (n >= max) return item.delete({ ...options });
+  return item.update({ "system.quantity": max - n }, { ...options });
 }
 
 /**
@@ -1289,14 +1289,14 @@ async function creditStack(item, target, n, options = {}) {
     similar = null;
   }
   if (similar) {
-    await similar.update({ "system.quantity": stackCount(similar) + n }, options);
+    await similar.update({ "system.quantity": stackCount(similar) + n }, { ...options });
     return {
       item: similar,
-      undo: async () => similar.update({ "system.quantity": Math.max(0, stackCount(similar) - n) }, options)
+      undo: async () => similar.update({ "system.quantity": Math.max(0, stackCount(similar) - n) }, { ...options })
     };
   }
-  const [created] = await target.createEmbeddedDocuments("Item", [data], options);
-  return { item: created ?? null, undo: async () => created?.delete(options) };
+  const [created] = await target.createEmbeddedDocuments("Item", [data], { ...options });
+  return { item: created ?? null, undo: async () => created?.delete({ ...options }) };
 }
 
 /**
@@ -1949,7 +1949,7 @@ function goodsOf(actor, move) {
 async function giveBack({ m, goods, from }, options) {
   const back = m.source ? from.items.get(m.source) : null;
   if (back && back.name === m.name && back.type !== "container" && goods.type !== "container") {
-    await back.update({ "system.quantity": stackCount(back) + m.qty }, options);
+    await back.update({ "system.quantity": stackCount(back) + m.qty }, { ...options });
     return takeAway(goods, m.qty, options);
   }
   return moveStack(goods, from, m.qty, { options });
@@ -2002,17 +2002,17 @@ async function revertLine(line, { options = {} } = {}) {
   try {
     const gain = p => totalCopper(p.after) - totalCopper(p.actor.system?.currency);
     for (const p of purses.filter(x => gain(x) >= 0)) {
-      await p.actor.update({ "system.currency": p.after }, options);
+      await p.actor.update({ "system.currency": p.after }, { ...options });
       wrote = true;
     }
     for (const it of items) {
       wrote = true;
-      if (it.grow) await it.goods.update({ "system.quantity": stackCount(it.goods) + it.m.qty }, options);
+      if (it.grow) await it.goods.update({ "system.quantity": stackCount(it.goods) + it.m.qty }, { ...options });
       else if (it.from) await giveBack(it, options);
       else await takeAway(it.goods, it.m.qty, options);
     }
     for (const p of purses.filter(x => gain(x) < 0)) {
-      await p.actor.update({ "system.currency": p.after }, options);
+      await p.actor.update({ "system.currency": p.after }, { ...options });
       wrote = true;
     }
   } catch (err) {

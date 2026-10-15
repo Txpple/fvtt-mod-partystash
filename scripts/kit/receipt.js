@@ -26,13 +26,15 @@
  * NO ECHO. Every document change a receipt describes, and every change a revert makes, is written
  * with `receipts.options()`, which carries ECHO_KEY. A listener that posts its own receipts from
  * document hooks skips a change whose options `echoes()`, so one move is one line however many
- * modules hear it.
+ * modules hear it. Each write gets its own copy (`{ ...options }`): Foundry keeps the operation
+ * object it is handed and fills it in (its parent among the rest), so one object shared by two
+ * writes carries the first write's parent into the second, which Foundry then refuses.
  *
  * THE REVERT. A GM sees a Revert button on each revertible line. Pressing it writes an ask onto
  * the message (any GM may update any message). The elect (elect.js) sees the ask, re-reads the
  * flag from the message, marks the line as running, and calls the module's
  * `revert(line, { message, index, options })`, which reverses the moves, makes every write under
- * `options`, checks everything before its first write, and returns `{ note }` or throws an Error
+ * a copy of `options`, checks everything before its first write, and returns `{ note }` or throws an Error
  * that says why not. The line then reads reverted, or shows the reason with the button back for
  * another try. One client performs every revert, so two GMs pressing at once revert once; an ask
  * made while no elect is ready waits on the message, and the next elect resumes it. A line left
