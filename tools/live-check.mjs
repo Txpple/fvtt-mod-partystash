@@ -81,6 +81,12 @@ const SCENARIO = async ({ probe, fx }) => {
       revertible: !!flag?.lines?.[0]?.revertible
     };
   };
+  const drawn = id => {
+    const el = document.querySelector(`[data-message-id="${id}"]`);
+    const row = el?.querySelector("[data-receipt-line]");
+    return { rendered: !!el, button: !!el?.querySelector(".openroll5e-receipt-revert"),
+      struck: row?.style?.textDecoration === "line-through" };
+  };
   const out = { memberUuid: member.uuid, stashUuid: stash.uuid };
 
   // A. Two of the stack go into the stash: credit the stash, then shrink the member's stack.
@@ -93,6 +99,7 @@ const SCENARIO = async ({ probe, fx }) => {
   await sleep(1500); // past the 500 ms receipt batch
   const stashed = linesSince(start).at(-1);
   out.a = { ...facts(stashed, start), rowId: row.id, memberQty: qty(member), stashQty: qty(stash) };
+  out.a.drawnBefore = drawn(stashed?.id);
 
   // B. The revert, as the button asks it.
   start = new Set(game.messages.keys());
@@ -105,6 +112,7 @@ const SCENARIO = async ({ probe, fx }) => {
     newLines: game.messages.contents.filter(m => !start.has(m.id)).length,
     again: stashed ? await api.revertReceipt(stashed.id, 0) : null
   });
+  out.b.drawnAfter = drawn(stashed?.id);
 
   // C. A GM's change to the stash's purse, and its revert.
   start = new Set(game.messages.keys());
@@ -163,6 +171,10 @@ try {
   check(r.b.memberQty === 3 && r.b.stashQty === 0, `as before the stash (member ${r.b.memberQty}, stash ${r.b.stashQty})`);
   check(r.b.newLines === 0, `the revert posted no line of its own (got ${r.b.newLines})`);
   check(r.b.again === false, "a reverted line cannot be asked again");
+  if (r.a.drawnBefore.rendered) {
+    check(r.a.drawnBefore.button, "the card the chat log drew carries the Revert button");
+    check(r.b.drawnAfter.struck && !r.b.drawnAfter.button, "once reverted the line is struck through and the button gone");
+  } else console.log("  note  the chat log did not draw the card here; the button was not looked at");
 
   console.log("# C — an adjustment of the purse, and its revert");
   console.log(`  [receipt] ${r.c.text}`);
