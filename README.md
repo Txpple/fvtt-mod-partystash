@@ -107,10 +107,10 @@ once revert once, and a reverted line is struck through for everyone.
 
 **Receipt Settings** picks who reads them, and Loot Shelf offers the same choice:
 
-- **Broadcast to the server** (default): posted to the chat log for the whole table.
-- **Participants and the DMs**: whispered to the player on the other end of the transfer and to the
-  DMs. Assistant DMs count as DMs.
-- **The DMs only**: whispered to the DMs alone.
+- **Broadcast receipts to the server** (default): posted to the chat log for the whole table.
+- **Receipts to the participants and the DMs**: whispered to the player on the other end of the
+  transfer and to the DMs. Assistant DMs count as DMs.
+- **Receipts to the DMs only**: whispered to the DMs alone.
 
 ## Settings
 
