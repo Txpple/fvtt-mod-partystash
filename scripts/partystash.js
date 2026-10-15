@@ -77,26 +77,25 @@
  * verified the same way on 2026-10-01 (probe I: two player clients, the stall, nobody online).
  */
 
+import { createElect } from "./kit/elect.js";
+import { createLogger } from "./kit/log.js";
+import { createReceipts, echoes, html, MODE_SETTING, MODES } from "./kit/receipt.js";
+
 const MODULE_ID = "fvtt-mod-partystash";
 
+// The Open Roll 5e kit (scripts/kit/, byte-identical across the family): the logger every line
+// goes through, the elect (the acting user's own leading window posts a receipt; the active GM's
+// performs a revert), and the receipts with their one-click revert.
+const log = createLogger(MODULE_ID);
+const elect = createElect(MODULE_ID, { log });
+const receipts = createReceipts(MODULE_ID, { elect, log, alias: "Party Stash", revert: revertLine });
+
 /**
- * The two receipt delivery policies, in the order the settings sheet reads them. The labels
- * double as the stored setting's `choices`; the notes are rendered under the radios.
+ * The receipt delivery policies, the kit's (the same three Loot Shelf offers), in the order the
+ * settings sheet reads them. The labels double as the stored setting's `choices`; the notes are
+ * rendered under the radios.
  */
-const RECEIPT_MODES = [
-  {
-    value: "public",
-    label: "Broadcast receipts to the server",
-    note: "Every receipt is posted to the chat log for the whole table to read."
-  },
-  {
-    value: "participants",
-    label: "Receipts to the transaction participants and the DMs",
-    note: "Whispered to the player on the other end of the transfer — whoever stashed, took, "
-      + "deposited or withdrew — and to the DMs. Assistant DMs count as DMs here and see "
-      + "every receipt."
-  }
-];
+const RECEIPT_MODES = MODES;
 
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, "enabled", {
@@ -121,7 +120,7 @@ Hooks.once("init", () => {
     default: true
   });
 
-  game.settings.register(MODULE_ID, "receiptVisibility", {
+  game.settings.register(MODULE_ID, MODE_SETTING, {
     name: "Receipts",
     hint: "Who reads the receipt when items or coin move through the party stash.",
     scope: "world",
@@ -178,6 +177,12 @@ Hooks.once("init", () => {
     type: Boolean,
     default: true
   });
+
+  // What the Revert button on a receipt does, for macros and the live checks (GM only).
+  game.modules.get(MODULE_ID).api = {
+    revertReceipt: (message, line = 0) =>
+      receipts.requestRevert(typeof message === "string" ? game.messages.get(message) : message, line)
+  };
 });
 
 /** Recently-warned blocked drags, keyed "itemUuid->targetUuid" -> timestamp. */
@@ -248,7 +253,7 @@ Hooks.once("setup", () => {
   const Base = globalThis.dnd5e?.applications?.actor?.BaseActorSheet;
   const orig = Base?.prototype?._defaultDropBehavior;
   if (!orig) {
-    console.error(`${MODULE_ID} | dnd5e BaseActorSheet#_defaultDropBehavior not found — `
+    log.error(`dnd5e BaseActorSheet#_defaultDropBehavior not found — `
       + "party-stash move semantics disabled (dnd5e 5.x required).");
     return;
   }
@@ -263,7 +268,7 @@ Hooks.once("setup", () => {
       if (verdict === "block") return "none"; // no-drop cursor; the drop never lands
       return fallback;
     } catch (err) {
-      console.error(`${MODULE_ID} | drop-behavior check failed`, err);
+      log.error(`drop-behavior check failed`, err);
       return fallback;
     }
   };
@@ -282,7 +287,7 @@ Hooks.once("setup", () => {
       try {
         if (await maybeSplitMove(this, event, item)) return;
       } catch (err) {
-        console.error(`${MODULE_ID} | split check failed — the drop falls through whole`, err);
+        log.error(`split check failed — the drop falls through whole`, err);
       }
       return origDrop.call(this, event, item);
     };
@@ -310,7 +315,7 @@ Hooks.once("setup", () => {
         const column = { id, width: 84, order: 1100, priority: 1000, label: "", template };
         for (const s of sections) if (Array.isArray(s.columns)) s.columns = [...s.columns, column];
       } catch (err) {
-        console.error(`${MODULE_ID} | adding the ${id} column failed`, err);
+        log.error(`adding the ${id} column failed`, err);
       }
     };
   };
@@ -339,7 +344,7 @@ Hooks.once("setup", () => {
         };
         for (const s of sections) if (Array.isArray(s.columns)) s.columns = [...s.columns, column];
       } catch (err) {
-        console.error(`${MODULE_ID} | adding the character-sheet column failed`, err);
+        log.error(`adding the character-sheet column failed`, err);
       }
     };
   }
@@ -350,7 +355,7 @@ Hooks.once("setup", () => {
   load([
     `modules/${MODULE_ID}/templates/take-column.hbs`,
     `modules/${MODULE_ID}/templates/stash-column.hbs`
-  ]).catch(err => console.error(`${MODULE_ID} | preloading the column templates failed`, err));
+  ]).catch(err => log.error(`preloading the column templates failed`, err));
 });
 
 /* -------------------------------------------------- */
@@ -358,16 +363,28 @@ Hooks.once("setup", () => {
 /* -------------------------------------------------- */
 
 /**
- * Every change to a group actor's loot is whispered to the GMs and the acting player —
- * an audit trail of who moved what through the stash. The chat line itself is Loot
- * Shelf's audit pattern (speaker alias, actor names in bold), but whispered rather than
- * public: stash traffic is bookkeeping, not table news.
+ * Every change to a group actor's loot posts a receipt: who moved what through the stash,
+ * through the kit's receipt (speaker alias, actor names in bold and escaped, the delivery
+ * policy of the Receipts setting, public by default), the same card Loot Shelf posts for
+ * shop and chest traffic.
  *
  * Receipts ride the DOCUMENT hooks, not the drag pipeline, so every pathway is covered:
  * the module's own retargeted drags, forced Shift/Ctrl drags, sidebar and compendium
  * stocking by the GM, macros and API calls. Only the initiating client records (the
  * hooks fire on every client; userId says whose gesture it was), so exactly one receipt
- * is posted per transfer, authored by the user who made it.
+ * is posted per transfer, authored by the user who made it. A change written under the
+ * kit's echo marker is skipped: Loot Shelf's kernel marks the coin and goods it lands in a
+ * group actor (its own receipt tells them), and a revert marks every write it makes.
+ *
+ * Each line carries its `moves`, as `flushReceipts`, the currency hook and the gift record
+ * them and `revertLine` reads them back:
+ *   { kind: "item", from, to, item, qty, name, type, img }
+ *       `qty` of the goods went from actor `from` (null: from outside the party's books, a
+ *       GM stocking the stash) to actor `to` (null: out of them), where they are the item
+ *       `item`; with `to` null, `item` is the stack on `from` that shrank.
+ *   { kind: "coin", actor, delta }
+ *       actor `actor`'s purse changed by `delta`, signed per denomination.
+ * A GM reverts a line with one click; the elect carries it out (the kit's receipt.js).
  *
  * Events are buffered for a short window before posting so one gesture reads as one
  * receipt:
@@ -392,7 +409,7 @@ Hooks.once("setup", () => {
  */
 
 const RECEIPT_WINDOW = 500;
-const receipts = { events: [], timer: null };
+const batch = { events: [], timer: null };
 
 function receiptsEnabled() {
   try {
@@ -403,25 +420,17 @@ function receiptsEnabled() {
 }
 
 /**
- * Should THIS client post the receipt for a change made by `userId`? The acting client does.
+ * Should THIS client post the receipt for a change made by `userId`? The acting client does:
+ * that user's own leading window (the kit's elect, `isActing`).
  *
  * Document hooks fire on every connected client, so somebody must be elected or one transfer
- * is logged once per browser.
- *
- * Loot Shelf's kernel elects the GM (`game.users.activeGM`) and that was tried here first, on
- * 2026-08-12, because it is per-WORLD rather than per-user and so cannot double. It was WRONG
- * for this module and is deliberately not used: Loot Shelf already requires a GM for every
- * mutation — players cannot write to a merchant — whereas Party Stash's updates run entirely
- * on the acting client. Electing the GM therefore imports a dependency the module otherwise
- * does not have, and when the elected GM's client is absent or running a stale script, EVERY
- * receipt silently vanishes. That was observed live: transfers landed, the ledger stayed empty.
- *
- * A missing ledger is worse than a doubled line, so the acting client posts. The known cost is
- * that one user with two live sessions logs each of their own transfers twice; in normal play a
- * user has one session, and a duplicate is legible noise rather than lost history.
+ * is logged once per browser. The GM is deliberately not the one: Party Stash's moves run
+ * entirely on the acting client and need no GM, and a receipt that waited on the GM's client
+ * would vanish whenever that client is absent or running a stale script. The leading window
+ * keeps one user with the game open in two windows to one receipt per transfer.
  */
 function shouldPostReceipt(userId) {
-  return userId === game.user.id;
+  return elect.isActing(userId);
 }
 
 /** The name to credit in a receipt line — the user whose gesture caused the change. */
@@ -449,22 +458,30 @@ function recordReceipt(item, dir, amount, fromStack = false, userId = game.user.
   if (!(actor instanceof Actor) || actor.pack) return;
   const isGroup = actor.type === "group";
   if (!isGroup && !isGroupMember(actor)) return;
-  receipts.events.push({
+  batch.events.push({
     dir, amount, isGroup, actor, fromStack, userId,
     name: item.name,
+    type: item.type,
+    img: item.img,
     id: item.id,
     containerId: item.system?.container ?? null,
     isContainer: item.type === "container",
     used: false
   });
-  clearTimeout(receipts.timer);
-  receipts.timer = setTimeout(flushReceipts, RECEIPT_WINDOW);
+  clearTimeout(batch.timer);
+  batch.timer = setTimeout(flushReceipts, RECEIPT_WINDOW);
 }
 
+/** One item move of a receipt line (see the receipts header for the shape). */
+const itemMove = (from, to, event, qty) => ({
+  kind: "item", from: from?.uuid ?? null, to: to?.uuid ?? null, item: event.id, qty,
+  name: event.name, type: event.type, img: event.img
+});
+
 function flushReceipts() {
-  receipts.timer = null;
-  const events = receipts.events;
-  receipts.events = [];
+  batch.timer = null;
+  const events = batch.events;
+  batch.events = [];
   try {
     const groupEvents = events.filter(e => e.isGroup);
     if (!groupEvents.length) return;
@@ -491,106 +508,65 @@ function flushReceipts() {
         participants.add(pair.actor);
       }
       const cargo = g.isContainer && events.some(e => e !== g && e.containerId === g.id);
-      const label = `${g.amount} × <em>${g.name}</em>${cargo ? " (and its contents)" : ""}`;
-      const group = `<strong>${g.actor.name}</strong>`;
+      const label = html`${g.amount} × <em>${g.name}</em>${cargo ? " (and its contents)" : ""}`;
+      const group = html`<strong>${g.actor.name}</strong>`;
       if (g.dir === "gain") {
         lines.push(pair
-          ? `<strong>${pair.actor.name}</strong> stashed ${label} in ${group}.`
-          : `<strong>${actingName(g.userId)}</strong> added ${label} to ${group}.`);
+          ? { html: html`<strong>${pair.actor.name}</strong> stashed ` + `${label} in ${group}.`,
+            moves: [itemMove(pair.actor, g.actor, g, g.amount)] }
+          : { html: html`<strong>${actingName(g.userId)}</strong> added ` + `${label} to ${group}.`,
+            moves: [itemMove(null, g.actor, g, g.amount)] });
       } else {
+        // Out of the stash with nobody on the other end: only a stack that is still there can
+        // take its amount back; an item deleted outright is recorded, not revertible.
         lines.push(pair
-          ? `<strong>${pair.actor.name}</strong> took ${label} from ${group}.`
-          : `<strong>${actingName(g.userId)}</strong> removed ${label} from ${group}.`);
+          ? { html: html`<strong>${pair.actor.name}</strong> took ` + `${label} from ${group}.`,
+            moves: [itemMove(g.actor, pair.actor, pair, g.amount)] }
+          : { html: html`<strong>${actingName(g.userId)}</strong> removed ` + `${label} from ${group}.`,
+            moves: [itemMove(g.actor, null, g, g.amount)], revertible: g.fromStack });
       }
     }
     if (lines.length) postReceipt(lines, groupEvents[0]?.userId, [...participants]);
   } catch (err) {
-    console.error(`${MODULE_ID} | building the transfer receipt failed`, err);
+    log.error(`building the transfer receipt failed`, err);
   }
 }
 
 /**
- * The whisper list for a receipt, or null to post it to the whole table.
+ * Post receipt lines, one card: the kit's receipt, public by default (a SHARED ledger is what
+ * settles "who took the healing potion?"), or whispered by the Receipts setting.
  *
- * "The DMs" means every user with the ASSISTANT role or above — what `User#isGM` answers and
- * `getWhisperRecipients("GM")` resolves — so an assistant DM is on every receipt. The setting
- * note says so rather than leaving a co-DM to discover it by missing one.
+ * PARTICIPANTS, for a whispered receipt, are the MEMBER side of the transfer — whoever
+ * stashed, took, deposited or withdrew — plus the acting user, who may be a GM moving things
+ * on a player's behalf. The GROUP actor is never consulted for readers even though it is the
+ * other end of every transfer: where players own the group, counting its owners would turn
+ * every whisper back into a broadcast and make the setting a no-op.
  *
- * PARTICIPANTS are the MEMBER side of the transfer — whoever stashed, took, deposited or
- * withdrew — plus the acting user, who may be a GM moving things on a player's behalf. The
- * GROUP actor is deliberately never consulted for recipients even though it is the other end
- * of every transfer: at this table (and at any table where the v1.1 drags work at all) the
- * players own the group, so counting its owners would quietly turn every whisper back into a
- * broadcast and make the setting a no-op.
+ * Created by the acting client, so the message is authored by the right user; the alias keeps
+ * it visibly a Party Stash ledger line rather than something a character said.
  *
- * @param {string} [userId]         The acting user.
- * @param {Actor[]} [participants]  The member-side actors in the transfer.
- * @returns {string[]|null}         User ids to whisper to, or null for a public message.
- */
-function receiptWhisper(userId, participants = []) {
-  let mode = "public";
-  try {
-    mode = game.settings.get(MODULE_ID, "receiptVisibility");
-  } catch {
-    return null; // not registered yet — a public line beats a lost one
-  }
-  if (mode !== "participants") return null;
-
-  const ids = new Set(ChatMessage.implementation.getWhisperRecipients("GM").map(u => u.id));
-  if (userId) ids.add(userId);
-  for (const actor of participants) {
-    if (!(actor instanceof Actor)) continue;
-    for (const u of game.users) {
-      if (!ids.has(u.id) && actor.testUserPermission(u, "OWNER")) ids.add(u.id);
-    }
-  }
-  return [...ids];
-}
-
-/**
- * Post receipt lines.
- *
- * These were whispered to the GMs and the acting player through v1.2, which made every stash
- * transfer invisible to everyone else — and a SHARED ledger is the point: it is what settles
- * "who took the healing potion?" without anyone having to remember. Public by the owner's
- * call on 2026-08-12, matching what Loot Shelf's audit lines already do for shop and chest
- * traffic — the two modules' logs read as one running account of the party's stuff. Since
- * v1.4 that is the DEFAULT rather than the only option: the Receipt Settings can send the
- * line to the transfer's participants and the DMs instead, the same choice Loot Shelf offers,
- * so a table can set one policy across both modules.
- *
- * Created by the acting client, so the message is authored by the right user without the
- * proxy-side `author` juggling Loot Shelf needs; the alias keeps it visibly a Party Stash
- * ledger line rather than something a character said.
- *
- * @param {string[]} lines          The receipt lines, already formatted.
+ * @param {{html: string, moves: object[], revertible?: boolean}[]} lines  Escaped, with moves.
  * @param {string} [userId]         The acting user.
  * @param {Actor[]} [participants]  The member-side actors in the transfer.
  */
 function postReceipt(lines, userId, participants = []) {
-  const whisper = receiptWhisper(userId, participants);
-  ChatMessage.implementation.create({
-    content: lines.join("<br>"),
-    ...(userId ? { author: userId } : {}),
-    ...(whisper ? { whisper } : {}),
-    speaker: { alias: "Party Stash" }
-  }).catch(err => console.error(`${MODULE_ID} | receipt message failed`, err));
+  void receipts.post({ lines, acting: userId ?? null, participants: participants.filter(a => a instanceof Actor) });
 }
 
-Hooks.on("createItem", (item, _options, userId) => {
+Hooks.on("createItem", (item, options, userId) => {
   try {
-    if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
+    if (echoes(options) || !shouldPostReceipt(userId) || !receiptsEnabled()) return;
     if (!item.system?.schema?.fields?.quantity) return; // physical items only
     if (isHandOff(item)) return; // a gift passing through — its own receipt, see the give section
     recordReceipt(item, "gain", Math.max(1, Math.floor(item.system.quantity ?? 1)), false, userId);
   } catch (err) {
-    console.error(`${MODULE_ID} | receipt create-hook failed`, err);
+    log.error(`receipt create-hook failed`, err);
   }
 });
 
-Hooks.on("deleteItem", (item, _options, userId) => {
+Hooks.on("deleteItem", (item, options, userId) => {
   try {
-    if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
+    if (echoes(options) || !shouldPostReceipt(userId) || !receiptsEnabled()) return;
     if (!item.system?.schema?.fields?.quantity) return;
     if (isHandOff(item)) {
       quiet.delete(item.id);
@@ -598,7 +574,7 @@ Hooks.on("deleteItem", (item, _options, userId) => {
     }
     recordReceipt(item, "loss", Math.max(1, Math.floor(item.system.quantity ?? 1)), false, userId);
   } catch (err) {
-    console.error(`${MODULE_ID} | receipt delete-hook failed`, err);
+    log.error(`receipt delete-hook failed`, err);
   }
 });
 
@@ -610,20 +586,20 @@ Hooks.on("preUpdateItem", (item, changes, options, _userId) => {
     if (!item.system?.schema?.fields?.quantity) return;
     foundry.utils.setProperty(options, `${MODULE_ID}.quantity`, item.system.quantity);
   } catch (err) {
-    console.error(`${MODULE_ID} | receipt pre-update failed`, err);
+    log.error(`receipt pre-update failed`, err);
   }
 });
 
 Hooks.on("updateItem", (item, _changes, options, userId) => {
   try {
-    if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
+    if (echoes(options) || !shouldPostReceipt(userId) || !receiptsEnabled()) return;
     const before = foundry.utils.getProperty(options, `${MODULE_ID}.quantity`);
     if (before === undefined) return;
     const delta = Math.floor(item.system.quantity ?? 0) - Math.floor(before ?? 0);
     if (!delta) return;
     recordReceipt(item, delta > 0 ? "gain" : "loss", Math.abs(delta), true, userId);
   } catch (err) {
-    console.error(`${MODULE_ID} | receipt update-hook failed`, err);
+    log.error(`receipt update-hook failed`, err);
   }
 });
 
@@ -633,13 +609,13 @@ Hooks.on("preUpdateActor", (actor, changes, options, _userId) => {
     if (changes.system?.currency === undefined || !receiptsEnabled()) return;
     foundry.utils.setProperty(options, `${MODULE_ID}.currency`, { ...actor.system.currency });
   } catch (err) {
-    console.error(`${MODULE_ID} | receipt currency pre-update failed`, err);
+    log.error(`receipt currency pre-update failed`, err);
   }
 });
 
 Hooks.on("updateActor", (actor, _changes, options, userId) => {
   try {
-    if (!shouldPostReceipt(userId) || !receiptsEnabled()) return;
+    if (echoes(options) || !shouldPostReceipt(userId) || !receiptsEnabled()) return;
     // Only a group actor's purse is stash traffic. The before-image below is written by
     // preUpdateActor, which already checks this — but the check is repeated here so a stray
     // options object can never make a member's own purse post a stash receipt.
@@ -648,8 +624,9 @@ Hooks.on("updateActor", (actor, _changes, options, userId) => {
     if (!before) return;
     const parts = [];
     let gains = 0, losses = 0;
-    for (const coin of ["pp", "gp", "ep", "sp", "cp"]) {
-      const delta = Math.floor(actor.system.currency?.[coin] ?? 0) - Math.floor(before[coin] ?? 0);
+    const change = purseDelta(before, actor.system.currency);
+    for (const coin of DENOMS) {
+      const delta = change[coin];
       if (!delta) continue;
       parts.push(`${delta > 0 ? "+" : ""}${delta} ${coin}`);
       if (delta > 0) gains++;
@@ -666,20 +643,25 @@ Hooks.on("updateActor", (actor, _changes, options, userId) => {
       // The dialog rides the member's uuid across so a whispered receipt can reach its
       // owners; the NAME is what the line prints, and stays the thing it is rendered from.
       const member = transfer.memberUuid ? fromUuidSync(transfer.memberUuid) : null;
-      postReceipt([`<strong>${transfer.member}</strong> `
-        + (transfer.dir === "deposit"
-          ? `deposited <strong>${moved}</strong> into <strong>${actor.name}</strong>.`
-          : `withdrew <strong>${moved}</strong> from <strong>${actor.name}</strong>.`)
-        + (transfer.converted ? " <em>Coin was converted to make change.</em>" : "")],
-        userId, member instanceof Actor ? [member] : []);
+      postReceipt([{
+        html: html`<strong>${transfer.member}</strong> `
+          + (transfer.dir === "deposit"
+            ? html`deposited <strong>${moved}</strong> into <strong>${actor.name}</strong>.`
+            : html`withdrew <strong>${moved}</strong> from <strong>${actor.name}</strong>.`)
+          + (transfer.converted ? " <em>Coin was converted to make change.</em>" : ""),
+        moves: Array.isArray(transfer.legs) ? transfer.legs : []
+      }], userId, member instanceof Actor ? [member] : []);
       return;
     }
 
     const verb = losses === 0 ? "added coin to" : gains === 0 ? "took coin from" : "adjusted the coin in";
-    postReceipt([`<strong>${actingName(userId)}</strong> ${verb} `
-      + `<strong>${actor.name}</strong>: ${parts.join(", ")}.`], userId);
+    postReceipt([{
+      html: html`<strong>${actingName(userId)}</strong> ${verb} `
+        + html`<strong>${actor.name}</strong>: ${parts.join(", ")}.`,
+      moves: [{ kind: "coin", actor: actor.uuid, delta: change }]
+    }], userId);
   } catch (err) {
-    console.error(`${MODULE_ID} | receipt currency-hook failed`, err);
+    log.error(`receipt currency-hook failed`, err);
   }
 });
 
@@ -704,7 +686,7 @@ Hooks.on("updateActor", (actor, _changes, options, userId) => {
 Hooks.on("renderSettingsConfig", (_app, element) => {
   try {
     const el = element instanceof HTMLElement ? element : element?.[0];
-    const select = el?.querySelector(`select[name="${MODULE_ID}.receiptVisibility"]`);
+    const select = el?.querySelector(`select[name="${MODULE_ID}.${MODE_SETTING}"]`);
     if (!select || select.dataset.partystashRadios) return;
     select.dataset.partystashRadios = "true";
     select.hidden = true;
@@ -730,7 +712,7 @@ Hooks.on("renderSettingsConfig", (_app, element) => {
       label.className = "checkbox";
       const input = document.createElement("input");
       input.type = "radio";
-      input.name = `${MODULE_ID}.receiptVisibility.choice`; // unregistered: ignored on submit
+      input.name = `${MODULE_ID}.${MODE_SETTING}.choice`; // unregistered: ignored on submit
       input.value = mode.value;
       input.checked = select.value === mode.value;
       input.addEventListener("change", () => {
@@ -763,7 +745,7 @@ Hooks.on("renderSettingsConfig", (_app, element) => {
     toggle?.addEventListener("change", sync);
     sync();
   } catch (err) {
-    console.error(`${MODULE_ID} | rendering the Receipt Settings block failed — the choice `
+    log.error(`rendering the Receipt Settings block failed — the choice `
       + "stays available as a dropdown", err);
   }
 });
@@ -818,14 +800,14 @@ const DENOMS = ["pp", "gp", "ep", "sp", "cp"];
 const ASCENDING = [...DENOMS].reverse();
 
 /** A sanitized copy of a currency object — non-negative integers, all five keys. */
-function coins(currency) {
+export function coins(currency) {
   const out = {};
   for (const d of DENOMS) out[d] = Math.max(0, Math.floor(Number(currency?.[d]) || 0));
   return out;
 }
 
 /** Total value of a currency object in copper — for "is there any coin at all" tests. */
-function totalCopper(currency) {
+export function totalCopper(currency) {
   const c = coins(currency);
   return DENOMS.reduce((total, d) => total + c[d] * RATES[d], 0);
 }
@@ -837,7 +819,7 @@ function totalCopper(currency) {
  * only), then the smallest remaining coin that covers what's left is broken, with the
  * change returned in gp/sp/cp. The result is the complete post-payment currency object.
  */
-function planDeduction(currency, cost) {
+export function planDeduction(currency, cost) {
   const c = coins(currency);
   cost = Math.max(0, Math.floor(cost));
   if (totalCopper(c) < cost) return null;
@@ -860,12 +842,41 @@ function planDeduction(currency, cost) {
   return c;
 }
 
+/** How a purse changed, per denomination, signed: `after` minus `before`. */
+export function purseDelta(before, after) {
+  const b = coins(before);
+  const a = coins(after);
+  const out = {};
+  for (const d of DENOMS) out[d] = a[d] - b[d];
+  return out;
+}
+
+/**
+ * The purse with a recorded change taken back out of it, or null when it can no longer cover
+ * that. Coins it gained go back as themselves while it still holds them; a shortfall in a
+ * denomination is paid out of the rest of the purse by `planDeduction`'s manners, so the value
+ * is exact and only what it can no longer give back in kind is converted (Loot Shelf's revert
+ * does the same).
+ */
+export function reverseDelta(purse, delta) {
+  const c = coins(purse);
+  let owed = 0;
+  for (const d of ASCENDING) {
+    c[d] -= Math.trunc(Number(delta?.[d]) || 0);
+    if (c[d] < 0) {
+      owed += -c[d] * RATES[d];
+      c[d] = 0;
+    }
+  }
+  return owed > 0 ? planDeduction(c, owed) : c;
+}
+
 /**
  * Human label for a currency object, e.g. "2 pp 12 gp 5 cp". The coins AS HELD — deliberately
  * not Loot Shelf's `formatCopper`, which collapses a total into gp/sp/cp and would report a
  * purse of 2 pp as "20 gp".
  */
-function formatCoins(currency) {
+export function formatCoins(currency) {
   const c = coins(currency);
   const parts = DENOMS.filter(d => c[d] > 0).map(d => `${c[d]} ${d}`);
   return parts.length ? parts.join(" ") : "no coin";
@@ -897,8 +908,10 @@ function coinPartners(group) {
  *   and whether any were made by converting the source's coin — or null for a no-op.
  */
 async function moveCoin(from, to, amounts, receipt) {
-  let fromPurse = coins(from.system?.currency);
-  const toPurse = coins(to.system?.currency);
+  const fromBefore = coins(from.system?.currency);
+  const toBefore = coins(to.system?.currency);
+  let fromPurse = coins(fromBefore);
+  const toPurse = coins(toBefore);
   const moved = {};
   // First pass: what the source holds loose moves literally.
   for (const d of DENOMS) {
@@ -929,7 +942,13 @@ async function moveCoin(from, to, amounts, receipt) {
   // object arrives at the second update already carrying the FIRST actor's currency snapshot.
   // That produced a bogus second receipt reading "Gren deposited 2 pp 5 gp into Gren" — caught
   // in the v1.3 ledger review.
-  const context = () => ({ [MODULE_ID]: { transfer: { ...receipt, amounts: moved, converted } } });
+  //
+  // The legs are what the receipt can revert: each purse's change, per denomination.
+  const legs = [
+    { kind: "coin", actor: to.uuid, delta: purseDelta(toBefore, toPurse) },
+    { kind: "coin", actor: from.uuid, delta: purseDelta(fromBefore, fromPurse) }
+  ];
+  const context = () => ({ [MODULE_ID]: { transfer: { ...receipt, amounts: moved, converted, legs } } });
   await to.update({ "system.currency": toPurse }, context());
   await from.update({ "system.currency": fromPurse }, context());
   return { moved, converted };
@@ -1107,7 +1126,7 @@ async function coinDialog(group, dir) {
         }
         sync();
       } catch (err) {
-        console.error(`${MODULE_ID} | wiring the coin dialog failed — the boxes keep their `
+        log.error(`wiring the coin dialog failed — the boxes keep their `
           + "initial caps and the transfer is still clamped on submit", err);
       }
     }
@@ -1127,7 +1146,7 @@ async function coinDialog(group, dir) {
       : `Withdrew ${formatCoins(outcome.moved)} from ${group.name} for ${partner.name}.`)
       + (outcome.converted ? " Coin was converted to make change." : ""));
   } catch (err) {
-    console.error(`${MODULE_ID} | moving coin failed`, err);
+    log.error(`moving coin failed`, err);
     ui.notifications.error(`Party Stash: that coin transfer failed (${err.message}).`);
   }
 }
@@ -1194,25 +1213,34 @@ function inventoryLabel(name) {
 
 /**
  * Move `n` of `item` to `target`, credit before debit. Containers ignore `n` and move
- * whole with their contents (the stock createWithContents path).
+ * whole with their contents (the stock createWithContents path). Returns how many moved and
+ * the item they are on `target` (the stack they joined, or the new row). `options` ride on
+ * every write (a revert's echo marker).
  */
-async function moveStack(item, target, n) {
+async function moveStack(item, target, n, { options = {} } = {}) {
   const max = stackCount(item);
   n = Math.min(max, Math.max(1, Math.floor(Number(n) || 1)));
 
   if (item.type === "container") {
     const Item5e = item.constructor;
     const toCreate = await Item5e.createWithContents([item]);
-    await Item5e.createDocuments(toCreate, { parent: target, keepId: true });
-    await item.delete({ deleteContents: true });
-    return max;
+    const created = await Item5e.createDocuments(toCreate, { ...options, parent: target, keepId: true });
+    await item.delete({ ...options, deleteContents: true });
+    return { moved: max, item: created?.[0] ?? null };
   }
 
-  await creditStack(item, target, n);
+  const { item: landed } = await creditStack(item, target, n, options);
 
-  if (n >= max) await item.delete();
-  else await item.update({ "system.quantity": max - n });
-  return n;
+  await takeAway(item, n, options);
+  return { moved: n, item: landed };
+}
+
+/** Remove `n` from a stack, deleting it when that is all of it (a container goes whole). */
+async function takeAway(item, n, options = {}) {
+  if (item.type === "container") return item.delete({ ...options, deleteContents: true });
+  const max = stackCount(item);
+  if (n >= max) return item.delete(options);
+  return item.update({ "system.quantity": max - n }, options);
 }
 
 /**
@@ -1235,11 +1263,12 @@ function carriedData(item, n) {
 }
 
 /**
- * The credit half of a non-container move: `n` of `item` land on `target`. Returns an
- * `undo` that takes exactly that credit back again — what the hand-off's guard calls when
- * this client turns out not to be the one that got the stash row (see claimRow).
+ * The credit half of a non-container move: `n` of `item` land on `target`. Returns the item
+ * they landed as, and an `undo` that takes exactly that credit back again — what the
+ * hand-off's guard calls when this client turns out not to be the one that got the stash row
+ * (see claimRow).
  */
-async function creditStack(item, target, n) {
+async function creditStack(item, target, n, options = {}) {
   const data = carriedData(item, n);
 
   // Merge into an existing stack the way dnd5e's own _onDropStackConsumables does
@@ -1257,11 +1286,14 @@ async function creditStack(item, target, n) {
     similar = null;
   }
   if (similar) {
-    await similar.update({ "system.quantity": stackCount(similar) + n });
-    return async () => similar.update({ "system.quantity": Math.max(0, stackCount(similar) - n) });
+    await similar.update({ "system.quantity": stackCount(similar) + n }, options);
+    return {
+      item: similar,
+      undo: async () => similar.update({ "system.quantity": Math.max(0, stackCount(similar) - n) }, options)
+    };
   }
-  const [created] = await target.createEmbeddedDocuments("Item", [data]);
-  return async () => created?.delete();
+  const [created] = await target.createEmbeddedDocuments("Item", [data], options);
+  return { item: created ?? null, undo: async () => created?.delete(options) };
 }
 
 /**
@@ -1408,10 +1440,10 @@ async function takeDialog(group, item) {
   });
   if (!picked) return;
   try {
-    const moved = await moveStack(item, picked.partner, picked.qty);
+    const { moved } = await moveStack(item, picked.partner, picked.qty);
     ui.notifications.info(`Took ${moved} × ${item.name} from ${group.name} for ${picked.partner.name}.`);
   } catch (err) {
-    console.error(`${MODULE_ID} | taking from the stash failed`, err);
+    log.error(`taking from the stash failed`, err);
     ui.notifications.error(`Party Stash: taking ${item.name} failed (${err.message}).`);
   }
 }
@@ -1446,10 +1478,10 @@ async function stashDialog(actor, item) {
   });
   if (!picked) return;
   try {
-    const moved = await moveStack(item, picked.partner, picked.qty);
+    const { moved } = await moveStack(item, picked.partner, picked.qty);
     ui.notifications.info(`Stashed ${moved} × ${item.name} in ${picked.partner.name}.`);
   } catch (err) {
-    console.error(`${MODULE_ID} | stashing failed`, err);
+    log.error(`stashing failed`, err);
     ui.notifications.error(`Party Stash: stashing ${item.name} failed (${err.message}).`);
   }
 }
@@ -1472,7 +1504,7 @@ function wireButtons(root, className, onClick, setting) {
       });
     }
   } catch (err) {
-    console.error(`${MODULE_ID} | wiring ${className} failed`, err);
+    log.error(`wiring ${className} failed`, err);
   }
 }
 
@@ -1687,7 +1719,7 @@ async function giveDialog(actor, item) {
           partnerSelect.innerHTML = toOptions(o);
         });
       } catch (err) {
-        console.error(`${MODULE_ID} | wiring the give dialog failed`, err);
+        log.error(`wiring the give dialog failed`, err);
       }
     }
   });
@@ -1699,24 +1731,32 @@ async function giveDialog(actor, item) {
   try {
     if (!choice.user) {
       // The giver owns the recipient: a plain move, no hand-off.
-      const moved = await moveStack(item, choice.actor, qty);
+      const facts = { name: item.name, type: item.type, img: item.img };
+      const { moved, item: landed } = await moveStack(item, choice.actor, qty);
       ui.notifications.info(`Gave ${moved} × ${item.name} to ${choice.actor.name}.`);
-      postGiveReceipt(actor, choice.actor, item.name, moved, container);
+      postGiveReceipt(actor, choice.actor, facts, moved, container, landed);
       return;
     }
     await handOff(actor, item, option.group, choice, qty);
   } catch (err) {
-    console.error(`${MODULE_ID} | giving failed`, err);
+    log.error(`giving failed`, err);
     ui.notifications.error(`Party Stash: giving ${item.name} failed (${err.message}).`);
   }
 }
 
-/** The one receipt a gift posts, by whichever client finished the move. */
-function postGiveReceipt(from, to, name, amount, cargo) {
+/**
+ * The one receipt a gift posts, by whichever client finished the move. `facts` is the gift's
+ * name, type and img; `landed` the item it became on the recipient (what a revert takes back).
+ */
+function postGiveReceipt(from, to, facts, amount, cargo, landed) {
   if (!receiptsEnabled()) return;
-  const label = `${amount} × <em>${name}</em>${cargo ? " (and its contents)" : ""}`;
-  postReceipt([`<strong>${from?.name ?? "Someone"}</strong> gave ${label} to <strong>${to.name}</strong>.`],
-    game.user.id, [from, to].filter(a => a instanceof Actor));
+  const label = html`${amount} × <em>${facts.name}</em>${cargo ? " (and its contents)" : ""}`;
+  const move = { kind: "item", from: from?.uuid ?? null, to: to.uuid, item: landed?.id ?? null, qty: amount, ...facts };
+  postReceipt([{
+    html: html`<strong>${from?.name ?? "Someone"}</strong> gave ` + `${label} to ` + html`<strong>${to.name}</strong>.`,
+    moves: [move],
+    revertible: !!from && !!landed
+  }], game.user.id, [from, to].filter(a => a instanceof Actor));
 }
 
 /**
@@ -1761,7 +1801,7 @@ async function handOff(actor, item, group, { actor: to, user }, n) {
 
   // Stalled. Take it back — unless the recipient gets there first after all.
   const live = group.items.get(row.id);
-  const back = live ? await claimRow(live, actor) : 0;
+  const back = live ? (await claimRow(live, actor)).moved : 0;
   if (back) {
     ui.notifications.error(`Party Stash: problem finding ${user.name} to give ${to.name} the `
       + `${name}. It's back with ${actor.name}. Try again.`);
@@ -1774,7 +1814,8 @@ async function handOff(actor, item, group, { actor: to, user }, n) {
  * Move a marked stash row onto `dest` — the recipient's half, and the giver's revert. THE
  * GUARD lives here: credit first, then delete the row; the delete decides. A delete that
  * throws, or that deletes nothing (the row was already gone), means another client got
- * there first, and this client undoes its own credit. Returns how many moved, 0 when lost.
+ * there first, and this client undoes its own credit. Returns how many moved (0 when lost)
+ * and the item they became on `dest`.
  */
 async function claimRow(row, dest) {
   const n = stackCount(row);
@@ -1783,6 +1824,7 @@ async function claimRow(row, dest) {
   for (const id of cargoIds(row)) quiet.add(id);
 
   let undo;
+  let landed = null;
   if (container) {
     const Item5e = row.constructor;
     const toCreate = await Item5e.createWithContents([row]);
@@ -1791,9 +1833,10 @@ async function claimRow(row, dest) {
     // crediting the same gift is refused by the server before the guard even runs.
     const created = await Item5e.createDocuments(toCreate, { parent: dest, keepId: true });
     const ids = created.map(i => i.id);
+    landed = created[0] ?? null;
     undo = async () => dest.deleteEmbeddedDocuments("Item", ids.filter(id => dest.items.has(id)));
   } else {
-    undo = await creditStack(row, dest, n);
+    ({ undo, item: landed } = await creditStack(row, dest, n));
   }
 
   let won = false;
@@ -1801,16 +1844,16 @@ async function claimRow(row, dest) {
     const deleted = await row.delete({ deleteContents: true });
     won = !!deleted;
   } catch (err) {
-    console.warn(`${MODULE_ID} | the deciding delete failed — another client has this gift`, err);
+    log.warn(`the deciding delete failed — another client has this gift`, err);
     won = false;
   }
-  if (won) return n;
+  if (won) return { moved: n, item: landed };
   try {
     await undo();
   } catch (err) {
-    console.error(`${MODULE_ID} | undoing a lost claim failed — a duplicate may remain`, err);
+    log.error("undoing a lost claim failed — a duplicate may remain", err);
   }
-  return 0;
+  return { moved: 0, item: null };
 }
 
 /** The recipient's half: claim a row marked for this user, then tell the table. */
@@ -1820,13 +1863,14 @@ async function finishGive(row, mark) {
   if (!to?.isOwner) return; // can't finish; the giver's timeout takes it back
   const cargo = row.type === "container";
   const name = row.name;
+  const facts = { name, type: row.type, img: row.img };
   try {
-    const moved = await claimRow(row, to);
+    const { moved, item: landed } = await claimRow(row, to);
     if (!moved) return;
     ui.notifications.info(`${from?.name ?? "Someone"} gave ${to.name} ${moved} × ${name}.`);
-    postGiveReceipt(from, to, name, moved, cargo);
+    postGiveReceipt(from, to, facts, moved, cargo, landed);
   } catch (err) {
-    console.error(`${MODULE_ID} | finishing a gift failed`, err);
+    log.error(`finishing a gift failed`, err);
   }
 }
 
@@ -1838,7 +1882,7 @@ Hooks.on("createItem", (item, _options, _userId) => {
     if (!game.settings.get(MODULE_ID, "give")) return;
     void finishGive(item, mark);
   } catch (err) {
-    console.error(`${MODULE_ID} | give trigger failed`, err);
+    log.error(`give trigger failed`, err);
   }
 });
 
@@ -1860,17 +1904,102 @@ Hooks.once("ready", () => {
         else if (mark.fromUser === game.user.id && Date.now() - (mark.at ?? 0) > GIVE_WAIT) {
           const from = game.actors.get(mark.from);
           if (!from?.isOwner) continue;
-          claimRow(row, from).then(back => {
+          claimRow(row, from).then(({ moved: back }) => {
             if (back) ui.notifications.warn(`Party Stash: ${row.name} came back to ${from.name} — `
               + `${game.users.get(mark.user)?.name ?? "the recipient"} never picked it up.`);
-          }).catch(err => console.error(`${MODULE_ID} | taking back a stale gift failed`, err));
+          }).catch(err => log.error(`taking back a stale gift failed`, err));
         }
       }
     }
   } catch (err) {
-    console.error(`${MODULE_ID} | the gift sweep failed`, err);
+    log.error(`the gift sweep failed`, err);
   }
 });
+
+/* -------------------------------------------------- */
+/*  Revert — a receipt line put back, on the elect    */
+/* -------------------------------------------------- */
+
+/** An actor from a receipt's uuid: a world actor, or the actor of a token. */
+async function actorOf(uuid) {
+  if (!uuid) return null;
+  const doc = await fromUuid(uuid).catch(() => null);
+  if (doc instanceof Actor) return doc;
+  return doc?.actor instanceof Actor ? doc.actor : null;
+}
+
+/** The goods a move left on an actor: the item it named, else a row of the same name and look. */
+function goodsOf(actor, move) {
+  const named = actor.items.get(move.item);
+  if (named && named.name === move.name) return named;
+  return actor.items.find(i => i.type === move.type && i.name === move.name && i.img === move.img) ?? null;
+}
+
+/**
+ * Reverse one receipt line, on the elect (the kit's receipt.js calls it with the echo-marked
+ * `options`, so these writes post no receipt of their own). Everything is checked before the
+ * first write: the goods still where the move left them, in the quantity it moved; every
+ * purse able to give back what it gained. Then the purses that gain are paid, the goods go back
+ * through the same moveStack every Take and Stash uses (credit before debit), a stack that
+ * shrank out of the books grows back, and the purses that lose pay last. A failure after the
+ * first write says so: the line is then for a GM to check by hand.
+ */
+async function revertLine(line, { options = {} } = {}) {
+  const moves = Array.isArray(line?.moves) ? line.moves : [];
+  const items = [];
+  for (const m of moves.filter(x => x.kind === "item")) {
+    if (m.to) {
+      const to = await actorOf(m.to);
+      if (!to) throw new Error(`the ${m.name} went to an actor that no longer exists`);
+      const goods = goodsOf(to, m);
+      if (!goods) throw new Error(`${to.name} no longer holds ${m.name}`);
+      if (goods.type !== "container" && stackCount(goods) < m.qty) {
+        throw new Error(`${to.name} holds ${stackCount(goods)} × ${m.name}, not the ${m.qty} to give back`);
+      }
+      const from = m.from ? await actorOf(m.from) : null;
+      if (m.from && !from) throw new Error(`the ${m.name} came from an actor that no longer exists`);
+      items.push({ m, goods, from, grow: false });
+    } else {
+      const from = await actorOf(m.from);
+      const goods = from?.items.get(m.item) ?? null;
+      if (!goods) throw new Error(`the ${m.name} is gone from ${from?.name ?? "the party"}`);
+      items.push({ m, goods, from, grow: true });
+    }
+  }
+
+  const purses = [];
+  for (const m of moves.filter(x => x.kind === "coin")) {
+    const actor = await actorOf(m.actor);
+    if (!actor) throw new Error("a purse on this receipt belongs to an actor that no longer exists");
+    const after = reverseDelta(actor.system?.currency, m.delta);
+    if (!after) {
+      throw new Error(`${actor.name} no longer has the coin to give back (${formatCoins(actor.system?.currency)})`);
+    }
+    purses.push({ actor, after });
+  }
+
+  let wrote = false;
+  try {
+    const gain = p => totalCopper(p.after) - totalCopper(p.actor.system?.currency);
+    for (const p of purses.filter(x => gain(x) >= 0)) {
+      await p.actor.update({ "system.currency": p.after }, options);
+      wrote = true;
+    }
+    for (const it of items) {
+      wrote = true;
+      if (it.grow) await it.goods.update({ "system.quantity": stackCount(it.goods) + it.m.qty }, options);
+      else if (it.from) await moveStack(it.goods, it.from, it.m.qty, { options });
+      else await takeAway(it.goods, it.m.qty, options);
+    }
+    for (const p of purses.filter(x => gain(x) < 0)) {
+      await p.actor.update({ "system.currency": p.after }, options);
+      wrote = true;
+    }
+  } catch (err) {
+    if (wrote) throw new Error(`the revert stopped partway (${err.message}); check the sheets by hand`);
+    throw err;
+  }
+}
 
 /**
  * Make sure the module's stylesheet is actually in the cascade.
@@ -1907,10 +2036,10 @@ Hooks.once("ready", () => {
     link.href = `modules/${MODULE_ID}/styles/partystash.css`;
     link.setAttribute(`data-${MODULE_ID}-fallback`, "true");
     document.head.append(link);
-    console.warn(`${MODULE_ID} | the manifest stylesheet is not in the cascade — loading it `
+    log.warn(`the manifest stylesheet is not in the cascade — loading it `
       + "directly. Expected only on a host whose package registry predates this version.");
   } catch (err) {
-    console.error(`${MODULE_ID} | loading the stylesheet failed — the coin buttons will work `
+    log.error(`loading the stylesheet failed — the coin buttons will work `
       + "but look unstyled", err);
   }
 });
@@ -1968,6 +2097,6 @@ Hooks.on("renderGroupActorSheet", (app, element) => {
     }
     section.append(wrap);
   } catch (err) {
-    console.error(`${MODULE_ID} | dressing the group currency row failed`, err);
+    log.error(`dressing the group currency row failed`, err);
   }
 });

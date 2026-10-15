@@ -16,8 +16,8 @@ splits stacks, hands items between members, and posts a receipt for every transf
 - **Stacks split.** A move asks how many; the rest stays put.
 - **Three buttons on inventory rows:** Take on the group sheet, Stash and Give on member character
   sheets. Give hands an item straight to another party member, with no GM involved.
-- **Every transfer posts a receipt** to chat: who moved what, in or out of the stash. Receipts go
-  to the whole table or to the transfer's participants and the DMs.
+- **Every transfer posts a receipt** to chat: who moved what, in or out of the stash. A GM can
+  revert a receipt's line with one click: the item back, the coin back.
 - **The destination is credited before the source is debited**, everywhere. A failure leaves a
   duplicate, never a loss, and the receipt shows it.
 
@@ -92,12 +92,25 @@ module's own moves, forced drags, GM stocking from the sidebar, macros and coin 
 gesture reads as one receipt: a container with its contents is one line, the two halves of a move
 pair up (*"Bob stashed 3 × Rations in The Party"*), a deposit names the member and the amount
 (*"Gren deposited 12 gp into The Party"*). Hand edits and GM adjustments read as adjustments.
+Each receipt is posted by the client of the player who made the move, once even when they have the
+game open in two windows. A sale or a loot take Loot Shelf already records (coin or goods it pays
+into the group) posts no second line here.
+
+Each line also carries what moved: the item, how many and where it went, and each purse's change
+coin by coin. A GM sees a **Revert** button on it, and reverting puts things back as they were
+before the line: a stashed item returns to the member, a taken one to the stash, a gift to its
+giver, coin to the purse it left, and a GM's stocking or adjustment comes back out. Everything is
+checked before anything changes; if the goods or the coin are no longer there to give back,
+nothing moves and the line says why. An item removed from the stash outright, to nobody, is on
+the record but cannot be reverted. One GM client carries out every revert, so two GMs pressing at
+once revert once, and a reverted line is struck through for everyone.
 
 **Receipt Settings** picks who reads them, and Loot Shelf offers the same choice:
 
 - **Broadcast to the server** (default): posted to the chat log for the whole table.
 - **Participants and the DMs**: whispered to the player on the other end of the transfer and to the
   DMs. Assistant DMs count as DMs.
+- **The DMs only**: whispered to the DMs alone.
 
 ## Settings
 
@@ -107,7 +120,7 @@ pair up (*"Bob stashed 3 × Rations in The Party"*), a deposit names the member 
 | --- | --- |
 | Move items between party and members | Off restores stock copy-on-drop everywhere, and the split prompt with it. |
 | Post transfer receipts | Off means no ledger at all. |
-| Receipts | Broadcast, or participants and the DMs. |
+| Receipts | Broadcast, participants and the DMs, or the DMs only. |
 | Deposit / withdraw coin window | Off restores the stock currency row for everyone. |
 | Take button on the group inventory | Off removes the Take column. |
 | Stash button on member character sheets | Off removes the Stash button. |
@@ -117,9 +130,12 @@ pair up (*"Bob stashed 3 × Rations in The Party"*), a deposit names the member 
 
 ```
 module.json                      the Foundry manifest
-scripts/partystash.js            the module, one file: drags, coin, stacks, give, receipts
+scripts/partystash.js            the module: drags, coin, stacks, give, receipts and their revert
+scripts/kit/                     the Open Roll 5e kit: elect.js, receipt.js, log.js, the same
+                                 bytes in every module that holds it (the suite keeps them)
 styles/partystash.css            the buttons, the dialogs and the column widths
 templates/                       the Take column and the Stash/Give column
+tests/                           the unit tests (Vitest): the kit, the coin arithmetic
 tools/
   verify-partystash.mjs          the live suite: drags, buttons, a two-client Give
   verify-partystash-coin.mjs     the live suite for the coin dialog and its receipts
@@ -132,7 +148,9 @@ BACKLOG.md                       what is asked for and not built yet
 
 ## Development
 
-There is no build step: the module is one plain ES module loaded from `scripts/`.
+There is no build step: the module is plain ES modules loaded from `scripts/`. `npm run verify` is
+the gate: Biome and the unit tests. `game.modules.get("fvtt-mod-partystash").api.revertReceipt(message,
+line)` does what the Revert button does (GM only).
 
 - The live suites run against the local sandbox with `FOUNDRY_HOST=local node
   tools/verify-partystash.mjs` and `… verify-partystash-coin.mjs`. They create and clean up their
